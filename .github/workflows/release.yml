@@ -1,0 +1,67 @@
+name: Release — build all & deploy prod
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tag from git tag
+        id: meta
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push api
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/api:stable
+
+      - name: Build and push worker
+        uses: docker/build-push-action@v5
+        with:
+          context: services/worker
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/worker:stable
+
+  deploy-prod:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Deploy all services to prod
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/ai-framework-cicd
+            export GITHUB_REPOSITORY=${{ github.repository }}
+            export TAG=${{ needs.build.outputs.tag }}
+            docker compose pull
+            docker compose up -d

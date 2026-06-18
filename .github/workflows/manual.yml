@@ -1,0 +1,82 @@
+name: Manual — build & deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to build"
+        required: true
+        type: choice
+        options: [api, worker, all]
+      deploy:
+        description: "Deploy after build?"
+        required: true
+        type: boolean
+        default: false
+      environment:
+        description: "Target environment"
+        required: false
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tag
+        id: meta
+        run: echo "tag=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push api
+        if: inputs.service == 'api' || inputs.service == 'all'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
+
+      - name: Build and push worker
+        if: inputs.service == 'worker' || inputs.service == 'all'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/worker
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
+
+  deploy:
+    needs: build
+    if: inputs.deploy == true
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/ai-framework-cicd
+            export GITHUB_REPOSITORY=${{ github.repository }}
+            export TAG=${{ needs.build.outputs.tag }}
+            docker compose pull ${{ inputs.service != 'all' && inputs.service || '' }}
+            docker compose up -d ${{ inputs.service != 'all' && inputs.service || '' }}

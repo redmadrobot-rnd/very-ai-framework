@@ -1,0 +1,86 @@
+name: Push main — build changed & deploy dev
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'services/api/**'
+            worker:
+              - 'services/worker/**'
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.api == 'true' || needs.detect.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tag
+        id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push api
+        if: needs.detect.outputs.api == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/api:latest
+
+      - name: Build and push worker
+        if: needs.detect.outputs.worker == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/worker
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/worker:latest
+
+  deploy-dev:
+    needs: [detect, build]
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Deploy changed services to dev
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/ai-framework-cicd
+            export GITHUB_REPOSITORY=${{ github.repository }}
+            export TAG=${{ needs.build.outputs.tag }}
+            ${{ needs.detect.outputs.api == 'true' && 'docker compose pull api && docker compose up -d api' || 'echo "api unchanged, skipping"' }}
+            ${{ needs.detect.outputs.worker == 'true' && 'docker compose pull worker && docker compose up -d worker' || 'echo "worker unchanged, skipping"' }}

@@ -1,0 +1,10 @@
+services:
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/${GITHUB_REPOSITORY}/worker:${TAG:-latest}
+    restart: unless-stopped
