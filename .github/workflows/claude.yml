@@ -22,5 +22,9 @@ jobs:
           fetch-depth: 0
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # OAuth-токен подписки Claude Pro/Max вместо API-ключа.
+          # Сгенерировать: `claude setup-token` (формат sk-ant-oat01-...).
+          # Внимание: расходует квоту твоей подписки — ок для нечастого @claude,
+          # для тяжёлого CI Anthropic рекомендует обычный API-ключ.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # @claude в комментарии распознаётся автоматически
