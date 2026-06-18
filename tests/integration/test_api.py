@@ -4,6 +4,12 @@ import urllib.request
 from http.server import HTTPServer
 from pathlib import Path
 
+import pytest
+
+# поднимает реальный сервер — относим к heavy: пропускается на feature push,
+# гоняется на PR
+pytestmark = pytest.mark.heavy
+
 
 def _load_handler():
     path = Path(__file__).resolve().parents[2] / "services" / "api" / "main.py"

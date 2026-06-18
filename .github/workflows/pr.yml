@@ -28,7 +28,7 @@ jobs:
       - run: pytest tests/integration -q
 
   codex-review:
-    needs: [unit-tests]
+    needs: [unit-tests, integration-tests]
     if: "!contains(github.event.pull_request.labels.*.name, 'skip:ai-review')"
     runs-on: ubuntu-latest
     permissions:

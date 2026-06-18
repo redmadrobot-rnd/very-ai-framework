@@ -49,9 +49,10 @@
 **Когда:** каждый push в `feature/**`.
 **Цель:** быстрый сигнал (< 3 мин), fail-fast. Без тяжёлых тестов и без деплоя.
 
-Два job'а параллельно:
+Три job'а параллельно:
 - **static** — `ruff` (check + format) на весь проект
-- **security** — `semgrep OWASP`, `pip-audit`, `trufflehog` параллельно
+- **security** — `semgrep OWASP`, `pip-audit`, `trufflehog`
+- **tests** — только лёгкие: `pytest -m "not heavy"` (heavy-тесты сюда не попадают)
 
 Сборка образов на feature-push **не запускается**. Образы собираются:
 - автоматически — при merge в `main` (только изменённые, см. этап 4)
@@ -75,9 +76,15 @@ static и security уже прошли на push (этап 2). Человек с
 
 ### 3.1. tests
 
-Полный прогон тестов в отдельных job'ах:
+Полный прогон в отдельных job'ах — **включая heavy** (в отличие от feature push,
+где они пропускались):
 - `pytest tests/unit`
 - `pytest tests/integration`
+
+Тесты помечаются маркером `@pytest.mark.heavy` (медленные/дорогие: e2e, load).
+На push в feature гоняется `pytest -m "not heavy"` — быстрый сигнал; на PR
+прогоняется всё. `codex-review` ждёт прохождения всех тест-job'ов (`needs`),
+чтобы не ревьюить заведомо сломанный код.
 
 ### 3.2. Codex review — автоматически (OpenAI)
 
