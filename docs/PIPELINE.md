@@ -86,14 +86,19 @@ static и security уже прошли на push (этап 2). Человек с
 прогоняется всё. `codex-review` ждёт прохождения всех тест-job'ов (`needs`),
 чтобы не ревьюить заведомо сломанный код.
 
-### 3.2. Codex review — автоматически (OpenAI)
+### 3.2. Codex review — автоматически, после тестов
 
-Срабатывает сам при открытии PR и на каждый push в ветку PR.
+Codex-ревью — **часть CI**, а не ручное действие: запускается само при открытии PR
+(и на каждый push в ветку PR), **после прохождения тестов**. Так ревью не зависит
+от того, вспомнил ли человек его попросить.
 
-- workflow на событии `pull_request`
-- job берёт diff PR (`git diff base...HEAD`), отправляет в OpenAI API
-- модель возвращает список находок (баги, безопасность, производительность)
-- скрипт постит их **inline-комментами** прямо на строки кода в PR
+- job `codex-review` в `pr.yml`, `needs: [unit-tests, integration-tests]`
+- `runs-on: [self-hosted, codex]` — крутится на нашем self-hosted runner'е
+- **подписка ChatGPT** (`auth.json` на раннере), а не OpenAI API — см. 3.4
+- берёт diff PR (`git diff origin/<base>...HEAD`), гоняет `codex exec`,
+  постит ревью комментом в PR
+- опциональный escape-hatch: label `skip:ai-review` отключает ревью на конкретном PR
+  (по умолчанию ревью идёт всегда)
 
 Это «первый проход» — машина отсеивает очевидное до того, как PR смотрит человек.
 
@@ -120,18 +125,17 @@ PR открыт ──▶ tests + Codex review (авто) ──▶ челове
                                    Claude правит → коммит в ветку PR → повтор CI
 ```
 
-### 3.4. Codex по подписке через self-hosted runner (для этого репо)
+### 3.4. Как это устроено: self-hosted runner на подписке
 
-Альтернатива API-варианту из 3.2: гонять Codex-ревью **из подписки ChatGPT**, а не
-из API-биллинга, и **по запросу** (`@codex review`). `openai/codex-action` для этого
-не подходит — он работает только на API-ключе (`OPENAI_API_KEY`), подписочный
-`auth.json` он не принимает. Поэтому вызываем `codex exec` напрямую на
-self-hosted runner'е, где сохранён логин Codex.
+Codex-ревью из 3.2 крутится на подписке ChatGPT, а не на OpenAI API.
+`openai/codex-action` для этого не подходит — он работает только на API-ключе
+(`OPENAI_API_KEY`), подписочный `auth.json` он не принимает. Поэтому вызываем
+`codex exec` напрямую на self-hosted runner'е, где сохранён логин Codex.
 
 Принцип:
 - на runner'е лежит `~/.codex/auth.json` (вход подпиской) → расход из плана;
-- workflow триггерится по комменту `@codex review` (auto-review не включаем);
-- job с `runs-on: self-hosted` запускает `codex exec` и постит ревью в PR.
+- job `codex-review` (`runs-on: [self-hosted, codex]`) запускается **автоматически**
+  после тестов (см. 3.2) и зовёт `codex exec`, постит ревью в PR.
 
 **Разовая настройка runner'а** (на доверенной машине):
 1. `codex login` → создаёт `~/.codex/auth.json`. Проверить, что внутри
@@ -161,16 +165,16 @@ self-hosted runner'е, где сохранён логин Codex.
 
 ### Ключи (секреты) — что, где, зачем
 
-| Секрет | Кто использует | Откуда берётся |
+| Секрет / креды | Кто использует | Откуда берётся |
 |---|---|---|
 | `GITHUB_TOKEN` | оба — для постинга комментов и пуша | **автоматически** выдаётся Actions, заводить не нужно (нужен только блок `permissions:` в job) |
-| `OPENAI_API_KEY` | Codex review | создаёшь в дашборде OpenAI → кладёшь в Settings → Secrets |
-| `ANTHROPIC_API_KEY` | `@claude` fixer | создаёшь в консоли Anthropic → кладёшь в Settings → Secrets |
+| `~/.codex/auth.json` (на runner'е) | Codex review | `codex login` на self-hosted runner'е — НЕ секрет репо, см. 3.4 |
+| `CLAUDE_CODE_OAUTH_TOKEN` | `@claude` fixer | `claude setup-token` → кладёшь в Settings → Secrets |
 
-Как это «подключается»: ключ лежит зашифрованным в секретах репо. В workflow он
-пробрасывается в job как `env`/`with`, например
-`OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}`. Сам ключ в коде и логах не
-светится — GitHub маскирует значения секретов в выводе.
+Codex не использует секрет репо вообще — авторизация лежит на самом раннере
+(`auth.json`). Для `@claude` токен лежит зашифрованным в секретах и пробрасывается
+как `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`; в логах
+GitHub маскирует значения секретов.
 
 `GITHUB_TOKEN` — особенный: его не нужно создавать, Actions генерирует его на
 каждый запуск. Чтобы он мог писать комменты и пушить, в job задаётся:

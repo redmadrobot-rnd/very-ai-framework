@@ -28,33 +28,41 @@ jobs:
       - run: pytest tests/integration -q
 
   codex-review:
+    # Автоматический Codex-ревью как часть CI — после прохождения тестов.
+    # Подписка ChatGPT (auth.json на self-hosted runner), без OpenAI API.
+    # skip:ai-review — опциональный escape-hatch, по умолчанию ревью идёт всегда.
     needs: [unit-tests, integration-tests]
     if: "!contains(github.event.pull_request.labels.*.name, 'skip:ai-review')"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, codex]
     permissions:
       pull-requests: write
       contents: read
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Codex review
-        if: env.OPENAI_API_KEY != ''
-        run: |
-          pip install openai
-          python .github/scripts/codex_review.py
+      - name: Review PR with Codex (subscription)
         env:
-          OPENAI_MODEL: gpt-4o-mini
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      - name: Skip notice
-        if: env.OPENAI_API_KEY == ''
-        run: echo "OPENAI_API_KEY не задан — Codex review пропущен (job зелёный)."
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -e
+          git fetch origin "$BASE"
+          git diff "origin/${BASE}...HEAD" > "/tmp/pr_${PR}.diff"
+          if [ ! -s "/tmp/pr_${PR}.diff" ]; then
+            gh pr comment "$PR" --body "🤖 Codex review: изменений относительно \`$BASE\` нет."
+            exit 0
+          fi
+          PROMPT="You are a senior code reviewer. Review the following git diff. Do NOT modify any files — only produce a review. Output concise markdown: bugs, security, performance, then a final verdict (LGTM or needs changes). Diff:
+
+          $(cat /tmp/pr_${PR}.diff)"
+          codex exec "$PROMPT" > "/tmp/review_${PR}.md" 2> "/tmp/codex_err_${PR}.log" || {
+            echo "codex exec failed:"; cat "/tmp/codex_err_${PR}.log"; exit 1;
+          }
+          {
+            echo "🤖 **Codex review** — подписка ChatGPT, self-hosted runner"
+            echo
+            cat "/tmp/review_${PR}.md"
+          } > "/tmp/comment_${PR}.md"
+          gh pr comment "$PR" --body-file "/tmp/comment_${PR}.md"
