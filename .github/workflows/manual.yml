@@ -4,20 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: "Service to build"
+        description: "Services to build (comma-separated, e.g. 'api,worker') or 'all'"
         required: true
-        type: choice
-        options: [api, worker, all]
+        type: string
+        default: all
       deploy:
         description: "Deploy after build?"
         required: true
         type: boolean
         default: false
       environment:
-        description: "Target environment"
+        description: "Target environment (must exist in repo Settings → Environments)"
         required: false
-        type: choice
-        options: [dev, prod]
+        type: string
         default: dev
 
 env:
@@ -25,7 +24,22 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check environment exists
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/environments/${{ inputs.environment }}")
+          if [ "$STATUS" != "200" ]; then
+            echo "Environment '${{ inputs.environment }}' not found in repo Settings → Environments"
+            exit 1
+          fi
+
   build:
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,6 +48,8 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -46,21 +62,16 @@ jobs:
         id: meta
         run: echo "tag=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push api
-        if: inputs.service == 'api' || inputs.service == 'all'
-        uses: docker/build-push-action@v5
-        with:
-          context: services/api
-          push: true
-          tags: ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
-
-      - name: Build and push worker
-        if: inputs.service == 'worker' || inputs.service == 'all'
-        uses: docker/build-push-action@v5
-        with:
-          context: services/worker
-          push: true
-          tags: ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
+      - name: Build and push services
+        run: |
+          INPUT="${{ inputs.service }}"
+          for dir in services/*/; do
+            svc=$(basename "$dir")
+            if [ "$INPUT" = "all" ] || echo "$INPUT" | tr ',' '\n' | grep -qx "$svc"; then
+              docker build -t "${{ env.IMAGE_PREFIX }}/${svc}:${{ steps.meta.outputs.tag }}" "$dir"
+              docker push "${{ env.IMAGE_PREFIX }}/${svc}:${{ steps.meta.outputs.tag }}"
+            fi
+          done
 
   deploy:
     needs: build
@@ -78,5 +89,10 @@ jobs:
             cd ~/ai-framework-cicd
             export GITHUB_REPOSITORY=${{ github.repository }}
             export TAG=${{ needs.build.outputs.tag }}
-            docker compose pull ${{ inputs.service != 'all' && inputs.service || '' }}
-            docker compose up -d ${{ inputs.service != 'all' && inputs.service || '' }}
+            INPUT="${{ inputs.service }}"
+            if [ "$INPUT" = "all" ]; then
+              docker compose pull && docker compose up -d
+            else
+              SVCS=$(echo "$INPUT" | tr ',' ' ')
+              docker compose pull $SVCS && docker compose up -d $SVCS
+            fi

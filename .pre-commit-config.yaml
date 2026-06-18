@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: secret-scan
+        name: Secret scan
+        entry: trufflehog filesystem --no-update .
+        language: system
+        pass_filenames: false
+
+      # - id: gitmark-lint
+      #   name: KB lint
+      #   entry: python3 skills/kb-search/gitmark.py lint
+      #   language: system
+      #   pass_filenames: false
+      #   files: \.md$

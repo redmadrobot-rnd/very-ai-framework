@@ -1,0 +1,1 @@
+# project dependencies — pip-audit scans this file in CI

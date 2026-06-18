@@ -1,0 +1,65 @@
+name: Feature CI
+
+on:
+  push:
+    branches: ["feature/**"]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          list-files: none
+          filters: |
+            api:
+              - 'services/api/**'
+            worker:
+              - 'services/worker/**'
+
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tools
+        run: pip install ruff
+
+      - name: Lint + format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+  security:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip security]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+      - name: SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/owasp-top-10
+
+      - name: Deps audit
+        run: |
+          pip install pip-audit
+          pip-audit --requirement requirements.txt
