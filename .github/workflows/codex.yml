@@ -1,0 +1,47 @@
+name: Codex review (subscription)
+
+# Подписочный Codex-ревьюер на self-hosted runner.
+# Триггерится по комменту "@codex review" в PR, расход — из подписки ChatGPT
+# (auth.json на раннере), а не из OpenAI API.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  codex-review:
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') }}
+    runs-on: [self-hosted, codex]
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Review PR with Codex
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -e
+          gh pr checkout "$PR"
+          git fetch origin main
+          git diff origin/main...HEAD > "/tmp/pr_${PR}.diff"
+          if [ ! -s "/tmp/pr_${PR}.diff" ]; then
+            gh pr comment "$PR" --body "🤖 Codex review: изменений относительно main не найдено."
+            exit 0
+          fi
+          PROMPT="You are a senior code reviewer. Review the following git diff. Do NOT modify any files — only produce a review. Output concise markdown: bugs, security, performance, then a final verdict (LGTM or needs changes). Diff:
+
+$(cat /tmp/pr_${PR}.diff)"
+          codex exec "$PROMPT" > "/tmp/review_${PR}.md" 2> "/tmp/codex_err_${PR}.log" || {
+            echo "codex exec failed:"; cat "/tmp/codex_err_${PR}.log"; exit 1;
+          }
+          {
+            echo "🤖 **Codex review** — подписка ChatGPT, self-hosted runner"
+            echo
+            cat "/tmp/review_${PR}.md"
+          } > "/tmp/comment_${PR}.md"
+          gh pr comment "$PR" --body-file "/tmp/comment_${PR}.md"
