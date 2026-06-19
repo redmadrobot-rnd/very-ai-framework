@@ -1,10 +1,14 @@
 services:
   api:
     image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}
+    env_file:
+      - app.env
     ports:
       - "${API_PORT:-8080}:8080"
     restart: unless-stopped
 
   worker:
     image: ghcr.io/${GITHUB_REPOSITORY}/worker:${TAG:-latest}
+    env_file:
+      - app.env
     restart: unless-stopped
