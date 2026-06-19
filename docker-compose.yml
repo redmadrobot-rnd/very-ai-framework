@@ -1,3 +1,6 @@
+# Пример (референс). Замени сервисы под свой проект.
+# Обязательное: образ = ghcr.io/${GITHUB_REPOSITORY}/<сервис>:${TAG}, и env_file: app.env
+# (его собирает деплой из конфига окружения). Порты/прочее — на усмотрение проекта.
 services:
   api:
     image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}

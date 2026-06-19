@@ -25,7 +25,3 @@
 ## Секреты
 - Никогда не коммить ключи/токены/секретные `.env`.
 - Несекретный конфиг → Environment **Variables**; секреты → Environment **Secrets**.
-
----
-Как устроен пайплайн (CI, ревью, деплой) — в [`README.md`](README.md) и
-[`docs/PIPELINE.md`](docs/PIPELINE.md).

@@ -72,13 +72,15 @@ cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
 cp /tmp/cicd-template/docker-compose.yml .   # шаблон — переписать под свои сервисы
 ```
 
-**`AGENTS.md`** (правила разработки — агенты читают его автоматически в целевом репо):
-- если его в целевом репо **нет** — скопируй: `cp /tmp/cicd-template/AGENTS.md .`;
-- если **есть** — НЕ затирай, **допиши** в него раздел правил этого CICD (ветки
-  `feature/*`, pre-commit, маркер `@pytest.mark.heavy`, секреты в Environments).
+**Правила разработки** — в шаблоне они в `AGENTS.md`, но целевой репо может
+использовать другой файл агент-инструкций. Перенеси правила в тот, что использует
+целевой проект, не привязываясь к имени:
+- репо уже имеет `AGENTS.md` / `CLAUDE.md` / иной (`.cursorrules`, `.github/copilot-instructions.md`, …) —
+  **допиши** туда раздел правил этого CICD (ветки `feature/*`, pre-commit,
+  `@pytest.mark.heavy`, секреты в Environments), **не затирая** существующее;
+- такого файла нет — создай `AGENTS.md` (`cp /tmp/cicd-template/AGENTS.md .`).
 
-`services/*`, `README.md`, `docs/` шаблона **не** копируй вслепую — это пример и
-документация шаблона; у целевого проекта свои сервисы и README.
+`README.md` шаблона **не** копируй вслепую — у целевого проекта свой README.
 
 ## Шаг 2. Привести проект к контракту
 
