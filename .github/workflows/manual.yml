@@ -21,7 +21,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
   validate:
@@ -79,20 +79,25 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+      - uses: actions/checkout@v4
+      - name: Copy compose + deploy script
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd ~/ai-framework-cicd
-            export GITHUB_REPOSITORY=${{ github.repository }}
-            export TAG=${{ needs.build.outputs.tag }}
-            INPUT="${{ inputs.service }}"
-            if [ "$INPUT" = "all" ]; then
-              docker compose pull && docker compose up -d
-            else
-              SVCS=$(echo "$INPUT" | tr ',' ' ')
-              docker compose pull $SVCS && docker compose up -d $SVCS
-            fi
+          source: "docker-compose.yml,scripts/deploy.sh"
+          target: "/srv/deploy/${{ inputs.environment }}"
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
+          script: >
+            bash /srv/deploy/${{ inputs.environment }}/scripts/deploy.sh
+            ${{ inputs.environment }} ${{ github.repository }} ${{ needs.build.outputs.tag }} "${{ inputs.service }}"

@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 env:
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
   detect:
@@ -72,15 +72,25 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     steps:
-      - name: Deploy changed services to dev
-        uses: appleboy/ssh-action@v1
+      - uses: actions/checkout@v4
+      - name: Copy compose + deploy script
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd ~/ai-framework-cicd
-            export GITHUB_REPOSITORY=${{ github.repository }}
-            export TAG=${{ needs.build.outputs.tag }}
-            ${{ needs.detect.outputs.api == 'true' && 'docker compose pull api && docker compose up -d api' || 'echo "api unchanged, skipping"' }}
-            ${{ needs.detect.outputs.worker == 'true' && 'docker compose pull worker && docker compose up -d worker' || 'echo "worker unchanged, skipping"' }}
+          source: "docker-compose.yml,scripts/deploy.sh"
+          target: "/srv/deploy/dev"
+      - name: Deploy changed services to dev
+        uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
+          script: >
+            bash /srv/deploy/dev/scripts/deploy.sh dev ${{ github.repository }} ${{ needs.build.outputs.tag }}
+            "${{ needs.detect.outputs.api == 'true' && 'api' || '' }} ${{ needs.detect.outputs.worker == 'true' && 'worker' || '' }}"

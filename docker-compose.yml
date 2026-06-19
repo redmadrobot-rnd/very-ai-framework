@@ -2,7 +2,7 @@ services:
   api:
     image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     restart: unless-stopped
 
   worker:
