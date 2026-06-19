@@ -24,22 +24,7 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check environment exists
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/environments/${{ inputs.environment }}")
-          if [ "$STATUS" != "200" ]; then
-            echo "Environment '${{ inputs.environment }}' not found in repo Settings → Environments"
-            exit 1
-          fi
-
   build:
-    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
