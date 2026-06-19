@@ -49,7 +49,19 @@ description: >
 1. **Environments** (Settings → Environments): создать `dev` и `prod` (и др. при нужде).
 2. **На каждый environment:**
    - Variables: `SSH_HOST`, `SSH_USER` (адрес/юзер — не секрет; видно, какой сервер к стенду);
-   - Secret: `SSH_KEY` (приватный deploy-ключ; публичный — в `~/.ssh/authorized_keys` сервера).
+   - Secret: `SSH_KEY` — приватный deploy-ключ.
+
+   **Сгенерировать deploy-ключ** (отдельная пара под деплой, НЕ переиспользуй личный):
+   ```bash
+   ssh-keygen -t ed25519 -f deploy_key -N "" -C "gh-deploy"   # без пароля — CI unattended
+   # публичный — на сервер (под пользователя SSH_USER):
+   ssh-copy-id -i deploy_key.pub <SSH_USER>@<SSH_HOST>
+   #   (или вручную добавить строку из deploy_key.pub в ~/.ssh/authorized_keys)
+   # приватный — содержимое файла deploy_key целиком — в Secret SSH_KEY
+   ```
+   Локальные файлы `deploy_key*` после этого можно удалить: приватный живёт в Secret
+   (он **write-only**, обратно не читается — если понадобится снова, перегенерируй пару).
+   Разные стенды могут иметь разные ключи (изоляция) или один общий — на твой выбор.
 3. **Конфиг приложения:** Variable `APP_DOTENV` (многострочный `.env`) на каждый
    environment; секретные значения — отдельными Environment Secrets (напр. `APP_SECRET`).
 4. **(опц.) @claude:** Secret `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) +
@@ -76,13 +88,3 @@ self-hosted runner'е с лейблами `self-hosted,codex` (вход — по
 - Публичный deploy-ключ в `authorized_keys`.
 - Каталоги создаются автоматически (`/srv/deploy/<env>` в `deploy.sh`).
 - Для приватных образов GHCR деплой логинится `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`).
-
-## Шаг 6. Проверка (прогнать сценарии по очереди)
-
-1. pre-commit локально на тестовом изменении.
-2. push в `feature/test` → Feature CI зелёный.
-3. PR в `main` → тесты + авто Codex review.
-4. `@codex review` и `@claude fix` в комментах PR.
-5. merge → деплой dev (проверить контейнеры/эндпоинт).
-6. тег `v0.0.1` → деплой prod (проверить).
-7. Manual `workflow_dispatch` → build + deploy на выбранный стенд.
