@@ -43,6 +43,12 @@ description: >
 - Тесты: `tests/unit` (быстрые), тяжёлые — пометить `@pytest.mark.heavy`.
 - Если проект не на Python — заменить в `feature.yml`/`pr.yml` шаги ruff/pytest/pip-audit
   на тулинг проекта (структура джоб остаётся).
+- **Включить pre-commit** (конфига мало — нужен git-хук):
+  ```bash
+  pip install pre-commit && pre-commit install
+  ```
+  Для local-хука `secret-scan` поставить `trufflehog`. Либо без хука — гонять
+  `pre-commit run` вручную перед коммитом (агентный вариант).
 
 ## Шаг 3. Настроить GitHub
 
@@ -61,7 +67,7 @@ description: >
    ```
    Локальные файлы `deploy_key*` после этого можно удалить: приватный живёт в Secret
    (он **write-only**, обратно не читается — если понадобится снова, перегенерируй пару).
-   Разные стенды могут иметь разные ключи (изоляция) или один общий — на твой выбор.
+   Разные стенды должны иметь разные ключи (изоляция)
 3. **Конфиг приложения:** Variable `APP_DOTENV` (многострочный `.env`) на каждый
    environment; секретные значения — отдельными Environment Secrets (напр. `APP_SECRET`).
 4. **(опц.) @claude:** Secret `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) +
