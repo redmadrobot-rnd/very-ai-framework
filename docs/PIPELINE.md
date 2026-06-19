@@ -86,19 +86,27 @@ static и security уже прошли на push (этап 2). Человек с
 прогоняется всё. `codex-review` ждёт прохождения всех тест-job'ов (`needs`),
 чтобы не ревьюить заведомо сломанный код.
 
-### 3.2. Codex review — автоматически, после тестов
+### 3.2. Codex review — авто на открытии + по команде
 
-Codex-ревью — **часть CI**, а не ручное действие: запускается само при открытии PR
-(и на каждый push в ветку PR), **после прохождения тестов**. Так ревью не зависит
-от того, вспомнил ли человек его попросить.
+Codex-ревью — **часть CI**, а не забываемое ручное действие, но и не на каждый
+коммит (иначе жжём квоту подписки):
 
-- job `codex-review` в `pr.yml`, `needs: [unit-tests, integration-tests]`
-- `runs-on: [self-hosted, codex]` — крутится на нашем self-hosted runner'е
-- **подписка ChatGPT** (`auth.json` на раннере), а не OpenAI API — см. 3.4
-- берёт diff PR (`git diff origin/<base>...HEAD`), гоняет `codex exec`,
-  постит ревью комментом в PR
-- опциональный escape-hatch: label `skip:ai-review` отключает ревью на конкретном PR
-  (по умолчанию ревью идёт всегда)
+- **автоматически при открытии PR** (`opened`), **после прохождения тестов** —
+  `job codex-review` в `pr.yml`, `needs: [unit-tests, integration-tests]`,
+  `if: github.event.action == 'opened'`;
+- **по команде `@codex review`** в комментарии PR — свежее ревью после правок,
+  когда человек его явно хочет (`codex-command.yml`);
+- тесты при этом гоняются на **каждый** push (а Codex — нет).
+
+Как работает сам ревьюер (общий скрипт `.github/scripts/codex_review.py`):
+- `runs-on: [self-hosted, codex]`, авторизация — **подписка ChatGPT**
+  (`auth.json` на раннере), не OpenAI API (см. 3.4);
+- берёт diff PR, гоняет `codex exec` → **структурированный JSON** находок;
+- постит **одну GitHub-review с inline-тредами** на конкретные строки +
+  summary с вердиктом (LGTM / needs changes); что не легло на строку — в summary;
+- escape-hatch: label `skip:ai-review` отключает авто-ревью на открытии.
+
+`concurrency` в `pr.yml` отменяет устаревшие прогоны при быстрых push'ах.
 
 Это «первый проход» — машина отсеивает очевидное до того, как PR смотрит человек.
 

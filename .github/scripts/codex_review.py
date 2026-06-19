@@ -129,8 +129,13 @@ def build_summary(verdict: str, summary: str, orphans: list[dict]) -> str:
 
 
 def main() -> None:
-    token, repo = env("GH_TOKEN"), env("REPO")
-    pr, base, head_sha = env("PR_NUMBER"), env("BASE_REF"), env("HEAD_SHA")
+    token, repo, pr = env("GH_TOKEN"), env("REPO"), env("PR_NUMBER")
+    base, head_sha = os.environ.get("BASE_REF"), os.environ.get("HEAD_SHA")
+    if not base or not head_sha:
+        # путь «по комментарию» не несёт base/head в событии — берём из API
+        _, info = gh_api("GET", f"/repos/{repo}/pulls/{pr}", token)
+        base = base or info["base"]["ref"]
+        head_sha = head_sha or info["head"]["sha"]
 
     subprocess.run(["git", "fetch", "origin", base], check=False)
     diff = run("git", "diff", f"origin/{base}...HEAD").strip()

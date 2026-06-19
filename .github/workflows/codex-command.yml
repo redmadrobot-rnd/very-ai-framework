@@ -1,0 +1,33 @@
+name: Codex review (on demand)
+
+# Повторное Codex-ревью по запросу: любой пишет "@codex review" в PR.
+# Автоматический проход — при открытии PR (см. pr.yml). Эта команда — для
+# свежего ревью после правок, когда человек его явно хочет.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  codex-review:
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') }}
+    runs-on: [self-hosted, codex]
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr checkout ${{ github.event.issue.number }}
+
+      - name: Review PR with Codex
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: python3 .github/scripts/codex_review.py

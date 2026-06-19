@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -28,11 +32,14 @@ jobs:
       - run: pytest tests/integration -q
 
   codex-review:
-    # Автоматический Codex-ревью как часть CI — после прохождения тестов.
-    # Подписка ChatGPT (auth.json на self-hosted runner), без OpenAI API.
-    # skip:ai-review — опциональный escape-hatch, по умолчанию ревью идёт всегда.
+    # Автоматический Codex-ревью после тестов — только при ОТКРЫТИИ PR
+    # (не на каждый push, чтобы не жечь квоту подписки).
+    # Повторное ревью — по команде "@codex review" (см. codex-command.yml).
+    # skip:ai-review — опциональный опт-аут даже на открытии.
     needs: [unit-tests, integration-tests]
-    if: "!contains(github.event.pull_request.labels.*.name, 'skip:ai-review')"
+    if: >
+      github.event.action == 'opened' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip:ai-review')
     runs-on: [self-hosted, codex]
     permissions:
       pull-requests: write
