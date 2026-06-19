@@ -56,17 +56,19 @@ description: >
    установить GitHub App «Claude» на репо.
 5. Включить GitHub Actions; убедиться, что `GITHUB_TOKEN` имеет `packages: write` (для GHCR).
 
-## Шаг 4. Self-hosted runner для Codex-ревью (по подписке)
+## Шаг 4. Codex-ревью: подключить к runner'у
 
-1. На доверенном сервере: `codex login --device-auth` → `~/.codex/auth.json`
-   (`"auth_mode": "chatgpt"`). Обращаться с ним как с паролем; один runner — последовательно.
-2. Зарегистрировать runner на репозиторий с лейблами `self-hosted,codex`
-   (Settings → Actions → Runners → New self-hosted runner), запустить как сервис.
-3. На сервере должны быть: `docker`, `gh`, `python3`, доступ `docker login ghcr.io`.
+Codex-ревью (`pr.yml` → `codex-review`, `codex-command.yml`) выполняется на
+self-hosted runner'е с лейблами `self-hosted,codex` (вход — подпиской ChatGPT).
 
-> Без этого Codex-ревью (`pr.yml` job `codex-review`, `codex-command.yml`) не на чем
-> выполняться. Альтернатива — переписать на `openai/codex-action` + `OPENAI_API_KEY`
-> (API-биллинг вместо подписки).
+- **Если такой runner уже развёрнут** (общий / в другой репозиторий организации) —
+  просто сделай его доступным этому репо: зарегистрируй на репозиторий или на
+  организацию с доступом к нему. Воркфлоу уже targeted на `runs-on: [self-hosted, codex]` —
+  больше ничего не нужно.
+- **Если готового runner'а нет** — разверни один раз по инструкции в
+  [`README.md`](../../README.md) → «Self-hosted runner для Codex-ревью (развёртывание)».
+- **Не нужна подписка** — альтернатива: переписать ревью на `openai/codex-action` +
+  `OPENAI_API_KEY` (биллинг по API), тогда self-hosted runner не требуется.
 
 ## Шаг 5. Сервер(ы) для деплоя
 
@@ -84,13 +86,3 @@ description: >
 5. merge → деплой dev (проверить контейнеры/эндпоинт).
 6. тег `v0.0.1` → деплой prod (проверить).
 7. Manual `workflow_dispatch` → build + deploy на выбранный стенд.
-
-## Частые грабли
-
-- **ruff не запинен** → CI и локаль форматируют по-разному. Держи одну версию в
-  `pyproject.toml` / `.pre-commit-config.yaml` / CI.
-- **Имена образов** build ≠ compose → деплой не находит образ. Префикс один:
-  `ghcr.io/<owner/repo>/<svc>`.
-- **Один сервер на dev+prod** → конфликт портов (универсальный compose не разводит порты).
-  В реале — разные хосты; на одном сервере стенды не должны делить порт.
-- **`GITHUB_TOKEN` не читает Environments API** — не делай через него валидацию env.
