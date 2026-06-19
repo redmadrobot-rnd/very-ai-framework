@@ -18,7 +18,12 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install pytest
-      - run: pytest tests/unit -q
+      - name: Unit tests
+        run: |
+          [ -d tests/unit ] || { echo "::notice::нет tests/unit — пропуск"; exit 0; }
+          set +e; pytest tests/unit -q; rc=$?
+          [ $rc -eq 5 ] && rc=0
+          exit $rc
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -29,7 +34,12 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install pytest
-      - run: pytest tests/integration -q
+      - name: Integration tests
+        run: |
+          [ -d tests/integration ] || { echo "::notice::нет tests/integration — пропуск"; exit 0; }
+          set +e; pytest tests/integration -q; rc=$?
+          [ $rc -eq 5 ] && rc=0
+          exit $rc
 
   codex-review:
     # Автоматический Codex-ревью после тестов — только при ОТКРЫТИИ PR

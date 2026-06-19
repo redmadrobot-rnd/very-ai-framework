@@ -13,8 +13,13 @@ permissions:
 
 jobs:
   claude:
-    # запускаемся только когда в комментарии есть упоминание @claude
-    if: contains(github.event.comment.body, '@claude')
+    # Триггер: @claude в комментарии И автор — участник репо (OWNER/MEMBER/COLLABORATOR).
+    # БЕЗОПАСНОСТЬ: job имеет contents: write и ПУШИТ коммиты. Guard по author_association
+    # не пускает посторонних. На ПУБЛИЧНЫХ репо будь особенно осторожен — не давай
+    # запускать форкам/случайным людям (риск злоупотребления записью).
+    if: >
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

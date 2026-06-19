@@ -30,7 +30,11 @@ jobs:
           cache: pip
       - run: pip install pytest
       - name: Light tests (heavy excluded)
-        run: pytest -m "not heavy" -q
+        run: |
+          [ -d tests ] || { echo "::notice::нет каталога tests — пропуск"; exit 0; }
+          set +e; pytest -m "not heavy" -q; rc=$?
+          [ $rc -eq 5 ] && rc=0   # exit 5 = тесты не собраны → не падаем
+          exit $rc
 
   security:
     runs-on: ubuntu-latest
@@ -53,4 +57,8 @@ jobs:
       - name: Deps audit
         run: |
           pip install pip-audit
-          pip-audit --requirement requirements.txt
+          if grep -q '^\[project\]' pyproject.toml; then
+            pip-audit .                      # читает зависимости из pyproject [project]
+          else
+            echo "::notice::в pyproject нет [project].dependencies — аудит пропущен"
+          fi

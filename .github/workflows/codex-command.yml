@@ -10,7 +10,13 @@ on:
 
 jobs:
   codex-review:
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '@codex review') }}
+    # Триггер: PR-коммент "@codex review" от участника репо (OWNER/MEMBER/COLLABORATOR).
+    # БЕЗОПАСНОСТЬ: бежит на self-hosted runner — НЕ пускай посторонних/форки,
+    # особенно на публичных репо (риск исполнения чужого кода на твоей машине).
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@codex review') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
     permissions:
       pull-requests: write

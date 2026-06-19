@@ -87,7 +87,11 @@ cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
   Он должен лишь соответствовать контракту: образ `ghcr.io/${GITHUB_REPOSITORY}/<svc>:${TAG}`
   и `env_file: .env` (этот `.env` собирает деплой из Environments — руками не коммить).
   Образец для ориентира — `docker-compose.example.yml` в репозитории-шаблоне.
-- Тесты: `tests/unit` (быстрые), тяжёлые — пометить `@pytest.mark.heavy`.
+- **Зависимости** — объяви в `pyproject.toml` → `[project].dependencies` (PEP 621);
+  `pip-audit .` читает их оттуда, отдельный `requirements.txt` не нужен.
+- Тесты: `tests/unit`, `tests/integration`; тяжёлые/медленные — `@pytest.mark.heavy`.
+  Тестов пока нет — не страшно: тест-джобы это терпят (не падают на «нет тестов»),
+  но без них гейт качества слабее — заведи хотя бы пару.
 - Если проект не на Python — заменить в `feature.yml`/`pr.yml` шаги ruff/pytest/pip-audit
   на тулинг проекта (структура джоб остаётся).
 - Включить pre-commit:
@@ -118,8 +122,15 @@ cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
 3. **Конфиг приложения:** Variable `APP_DOTENV` (многострочный `.env`) на каждый
    environment; секретные значения — отдельными Environment Secrets (напр. `APP_SECRET`).
 4. **(опц.) @claude:** Secret `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) +
-   установить GitHub App «Claude» на репо.
+   установить GitHub App «Claude». `@claude`/`@codex review` триггерят только участники
+   репо (guard по `author_association` в воркфлоу). **На ПУБЛИЧНЫХ репо осторожно:**
+   `@claude` пушит коммиты, `@codex` бежит на self-hosted — не давай их форкам/посторонним.
 5. Включить GitHub Actions; убедиться, что `GITHUB_TOKEN` имеет `packages: write` (для GHCR).
+6. **Branch protection** (Settings → Branches → правило для `main`): требовать PR и
+   **required status checks** — `unit-tests`, `integration-tests` (бегут на PR), чтобы
+   красный CI не дал смёржить. `static`/`security` бегут на push в `feature` (если хочешь
+   требовать и их на PR — добавь им триггер `pull_request`). `codex-review` в required
+   не ставь — он на self-hosted и только при открытии PR.
 
 ## Шаг 4. Codex-ревью: подключить к runner'у
 
