@@ -1,18 +1,22 @@
 ---
 name: setup-cicd
 description: >
-  Развернуть универсальный CI/CD (этот репозиторий как шаблон) в целевом проекте:
+  Развернуть универсальный CI/CD из репозитория-шаблона в целевой проект:
   pre-commit, Feature/PR CI, авто Codex review, @claude-фиксы, деплой на dev по merge
   и на prod по тегу. Использовать, когда нужно поставить такой же пайплайн в новый/другой
   репозиторий на GitHub Actions с контейнерными сервисами (services/* + docker-compose).
 ---
 
-# Setup CI/CD (универсальный пайплайн) в целевом репозитории
+# Setup CI/CD (универсальный пайплайн)
 
-Цель — воспроизвести пайплайн из этого репозитория-шаблона. Имена сервисов/порты не
-хардкодятся; контракт — каждый сервис это каталог `services/<имя>/` со своим `Dockerfile`.
+Ты переносишь пайплайн из **репозитория-шаблона** в **целевой репозиторий**:
 
-Работай по шагам, не пропуская проверку в конце.
+- **Шаблон (источник файлов):** `https://github.com/virrius/ai-framework-cicd`
+  — если на вход дан другой URL, используй его.
+- **Целевой репозиторий:** проект, в котором ты сейчас работаешь и куда ставим CI/CD.
+
+Контракт: каждый сервис — каталог `services/<имя>/` со своим `Dockerfile`; имена
+сервисов и порты нигде не хардкодятся. Работай по шагам.
 
 ## Предусловия (уточни у пользователя, если неизвестно)
 
@@ -21,19 +25,24 @@ description: >
 - Доступ: токен GitHub с правами на репо/секреты/environments; SSH-доступ к серверу.
 - Для Codex-ревью по подписке — аккаунт ChatGPT с Codex (для `codex login` на раннере).
 
-## Шаг 1. Скопировать файлы пайплайна
+## Шаг 1. Перенести файлы пайплайна из шаблона
 
-Из репозитория-шаблона перенести как есть:
+Из корня **целевого** репозитория:
 
-- `.github/workflows/`: `feature.yml`, `pr.yml`, `codex-command.yml`, `claude.yml`,
-  `push-main.yml`, `release.yml`, `manual.yml`
-- `.github/scripts/codex_review.py`
-- `scripts/services.sh`, `scripts/deploy.sh`
-- `.pre-commit-config.yaml`, `pyproject.toml` (конфиг ruff + pytest-маркер `heavy`)
-- `docker-compose.yml` (как шаблон — переписать под сервисы проекта)
-- `AGENTS.md`, `README.md` (адаптировать)
+```bash
+TEMPLATE=https://github.com/virrius/ai-framework-cicd   # или переданный URL
+git clone --depth 1 "$TEMPLATE" /tmp/cicd-template
 
-Не переноси папку `services/*` шаблона — это пример; у проекта свои сервисы.
+mkdir -p .github/workflows .github/scripts scripts
+cp /tmp/cicd-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
+cp /tmp/cicd-template/.github/scripts/codex_review.py .github/scripts/
+cp /tmp/cicd-template/scripts/{services.sh,deploy.sh} scripts/
+cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml,AGENTS.md} .
+cp /tmp/cicd-template/docker-compose.yml .   # шаблон — переписать под свои сервисы
+```
+
+`services/*`, `README.md`, `docs/` шаблона **не** копируй вслепую — это пример и
+документация шаблона; у целевого проекта свои сервисы и README.
 
 ## Шаг 2. Привести проект к контракту
 
@@ -43,7 +52,7 @@ description: >
 - Тесты: `tests/unit` (быстрые), тяжёлые — пометить `@pytest.mark.heavy`.
 - Если проект не на Python — заменить в `feature.yml`/`pr.yml` шаги ruff/pytest/pip-audit
   на тулинг проекта (структура джоб остаётся).
-- **Включить pre-commit** (конфига мало — нужен git-хук):
+- Включить pre-commit:
   ```bash
   pip install pre-commit && pre-commit install
   ```
