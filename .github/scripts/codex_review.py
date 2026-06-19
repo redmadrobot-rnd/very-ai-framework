@@ -143,15 +143,23 @@ def main() -> None:
     subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], check=False)
     diff = run("git", "diff", f"origin/{base}...FETCH_HEAD").strip()
     if not diff:
-        gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token,
-               {"body": f"🤖 Codex review: изменений относительно `{base}` нет."})
+        gh_api(
+            "POST",
+            f"/repos/{repo}/issues/{pr}/comments",
+            token,
+            {"body": f"🤖 Codex review: изменений относительно `{base}` нет."},
+        )
         return
 
     raw = run("codex", "exec", PROMPT + diff, timeout=600)
     parsed = parse_codex_json(raw)
     if parsed is None:
-        gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token,
-               {"body": "🤖 **Codex review**\n\n" + raw.strip()[:60000]})
+        gh_api(
+            "POST",
+            f"/repos/{repo}/issues/{pr}/comments",
+            token,
+            {"body": "🤖 **Codex review**\n\n" + raw.strip()[:60000]},
+        )
         return
 
     verdict = parsed.get("verdict", "lgtm")
@@ -162,13 +170,15 @@ def main() -> None:
     for f in findings:
         path, line = f.get("path"), f.get("line")
         if path in valid and isinstance(line, int) and line in valid[path]:
-            inline.append({
-                "path": path,
-                "line": line,
-                "side": "RIGHT",
-                "body": f"{SEV_EMOJI.get(f.get('severity'), '⚪')} **{f.get('category', '').upper()}**: "
-                        f"{f.get('comment', '')}",
-            })
+            inline.append(
+                {
+                    "path": path,
+                    "line": line,
+                    "side": "RIGHT",
+                    "body": f"{SEV_EMOJI.get(f.get('severity'), '⚪')} **{f.get('category', '').upper()}**: "
+                    f"{f.get('comment', '')}",
+                }
+            )
         else:
             orphans.append(f)
 
@@ -179,11 +189,14 @@ def main() -> None:
     if status >= 300:
         # inline anchoring rejected — fall back to a plain summary comment
         all_findings = orphans + [
-            {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]}
-            for c in inline
+            {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]} for c in inline
         ]
-        gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token,
-               {"body": build_summary(verdict, parsed.get("summary", ""), all_findings)})
+        gh_api(
+            "POST",
+            f"/repos/{repo}/issues/{pr}/comments",
+            token,
+            {"body": build_summary(verdict, parsed.get("summary", ""), all_findings)},
+        )
         print(f"reviews API returned {status}; posted summary comment instead")
     else:
         print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
