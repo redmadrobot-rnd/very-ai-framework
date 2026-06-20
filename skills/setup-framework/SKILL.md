@@ -114,7 +114,7 @@ file the target uses, **without binding to the name**:
 ```bash
 mkdir -p docs/gitmark
 cp /tmp/aifw-template/docs/gitmark/ontology.md docs/gitmark/   # the ontology spec, reusable as-is
-grep -qxF '.gitmark/' .gitignore 2>/dev/null || echo '.gitmark/' >> .gitignore   # derived index, never committed
+for pat in '.gitmark/' '__pycache__/' '*.pyc'; do grep -qxF "$pat" .gitignore 2>/dev/null || echo "$pat" >> .gitignore; done   # derived index + bytecode — never committed
 python3 .claude/skills/kb-search/gitmark.py index              # build the search index
 ```
 
@@ -140,7 +140,10 @@ Bring the project to the contract:
   and `env_file: .env` (this `.env` is assembled by deploy from Environments — don't commit it by hand).
   A reference example — `docker-compose.example.yml` in the template repo.
 - **Dependencies** — declare them in `pyproject.toml` → `[project].dependencies` (PEP 621);
-  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed.
+  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed. The CI test jobs
+  install the project editable (`pip install -e .`) so tests import the real package, not a sys.path hack.
+- **Test-only deps** (e.g. `httpx` for `fastapi.TestClient`, pytest plugins) → declare a
+  `[project.optional-dependencies]` `test = [...]` extra; CI installs it via `pip install -e ".[test]"`.
 - Tests: `tests/unit`, `tests/integration`; heavy/slow ones — `@pytest.mark.heavy`.
   No tests yet — that's fine: the test jobs tolerate it (they don't fail on "no tests"),
   but without them the quality gate is weaker — add at least a couple.

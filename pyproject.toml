@@ -1,5 +1,8 @@
 [tool.ruff]
 line-length = 120
+# Вендоренный CLI фреймворка (gitmark) — это инструмент, а не исходники проекта;
+# не гоняем по нему линтер в адаптирующемся репо.
+extend-exclude = [".claude/skills"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

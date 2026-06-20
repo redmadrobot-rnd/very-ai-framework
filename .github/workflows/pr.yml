@@ -17,7 +17,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install pytest
+      - name: Install project + test deps (editable; pytest good practices)
+        run: |
+          pip install pytest
+          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
       - name: Unit tests
         run: |
           [ -d tests/unit ] || { echo "::notice::нет tests/unit — пропуск"; exit 0; }
@@ -33,7 +36,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install pytest
+      - name: Install project + test deps (editable; pytest good practices)
+        run: |
+          pip install pytest
+          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
       - name: Integration tests
         run: |
           [ -d tests/integration ] || { echo "::notice::нет tests/integration — пропуск"; exit 0; }

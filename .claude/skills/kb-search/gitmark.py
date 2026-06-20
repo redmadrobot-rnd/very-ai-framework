@@ -17,6 +17,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+# Windows-консоль (cp1251) роняет вывод с ✓/кириллицей — форсируем UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # Гарантируем импорт пакета gm/ рядом с этим файлом (при запуске по абсолютному пути).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
