@@ -207,6 +207,12 @@ Bring the project to the contract:
 Codex review (`pr.yml` → `codex-review`, `codex-command.yml`) runs on a
 self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT subscription).
 
+**Off by default — enable explicitly.** Both review jobs are gated on a repo Variable
+`CODEX_REVIEW`: they run only when `CODEX_REVIEW == 'true'`. Left unset (default), the jobs are
+skipped — so a PR never hangs on a `codex-review` check waiting for a runner that isn't there.
+Set `CODEX_REVIEW=true` **only after** a `self-hosted,codex` runner is available; the jobs also
+carry `timeout-minutes: 30`, so a running review can't hang forever either.
+
 - **If such a runner is already deployed** (shared / in another org repository) —
   just make it available to this repo: register it for the repository or for the
   organization with access to it. The workflows are already targeted at `runs-on: [self-hosted, codex]` —

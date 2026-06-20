@@ -55,8 +55,10 @@ jobs:
     needs: [unit-tests, integration-tests]
     if: >
       github.event.action == 'opened' &&
+      vars.CODEX_REVIEW == 'true' &&
       !contains(github.event.pull_request.labels.*.name, 'skip:ai-review')
     runs-on: [self-hosted, codex]
+    timeout-minutes: 30
     permissions:
       pull-requests: write
       contents: read
