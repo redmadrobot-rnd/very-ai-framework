@@ -2,10 +2,13 @@ name: Codex commands (on demand)
 
 # Codex-команды в PR-комментарии:
 #   "@codex review" — свежее ревью после правок (авто-проход — при открытии PR, см. pr.yml);
-#   "@codex answer <вопрос>" — ответ Codex с контекстом PR и ветки комментариев (диалог).
+#   "@codex answer <вопрос>" — ответ Codex с контекстом PR; работает и в общем треде
+#     (issue_comment), и как reply под inline-находкой ревью (pull_request_review_comment).
 
 on:
   issue_comment:
+    types: [created]
+  pull_request_review_comment:
     types: [created]
 
 jobs:
@@ -56,4 +59,31 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.issue.number }}
           QUESTION: ${{ github.event.comment.body }}
+          MODE: issue
+        run: python3 .github/scripts/codex_answer.py
+
+  codex-answer-inline:
+    # Триггер: "@codex answer" как reply ПОД inline-комментарием ревью (в т.ч. под находкой Codex).
+    # Это отдельное событие pull_request_review_comment — у него своя структура payload.
+    if: >
+      github.event_name == 'pull_request_review_comment' &&
+      contains(github.event.comment.body, '@codex answer') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: [self-hosted, codex]
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Answer inline thread with Codex
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUESTION: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          MODE: inline
         run: python3 .github/scripts/codex_answer.py
