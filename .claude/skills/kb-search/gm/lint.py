@@ -96,33 +96,48 @@ def _parse_val(val: str):
     return val.strip("'\"")
 
 
+def _indent(raw: str) -> int:
+    """Ширина ведущего отступа (пробелы/табы)."""
+    return len(raw) - len(raw.lstrip(" \t"))
+
+
 def parse_frontmatter(text: str) -> dict | None:
     """Мини-парсер YAML-frontmatter (stdlib, без pyyaml).
 
     Поддерживает: скаляры, плоские списки (инлайн `[..]` и блочные `- ..`) и
-    вложенное отображение под `links:` (`links:` + отступом `documents: [..]` и т.п.).
+    вложенное отображение под `links:` — как инлайн-списки (`documents: [a, b]`),
+    так и блочные (`depends_on:` + строкой ниже `  - a`).
     """
     m = FM_RE.match(text)
     if not m:
         return None
-    fm, cur_key = {}, None
+    fm: dict = {}
+    cur_key = None   # ключ верхнего уровня, чьё значение — list или dict
+    cur_sub = None   # подключ внутри map-блока (напр. links.depends_on), чьё значение — list
     for raw in m.group(1).split("\n"):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        indented = raw[:1] in (" ", "\t")
+        indent = _indent(raw)
         stripped = raw.strip()
-        # элемент блочного списка "- x" под текущим ключом
-        if stripped.startswith("- ") and isinstance(fm.get(cur_key), list):
-            fm[cur_key].append(stripped[2:].strip().strip("[]'\""))
+        # элемент блочного списка "- x": во вложенный список под map либо в список верхнего уровня
+        if stripped.startswith("- "):
+            item = stripped[2:].strip().strip("[]'\"")
+            if cur_sub is not None and isinstance(fm.get(cur_key), dict) and isinstance(fm[cur_key].get(cur_sub), list):
+                fm[cur_key][cur_sub].append(item)
+            elif isinstance(fm.get(cur_key), list):
+                fm[cur_key].append(item)
             continue
         if ":" not in stripped:
             continue
         key, _, val = stripped.partition(":")
         key, val = key.strip(), val.strip()
-        # вложенная пара "key: value" под map-блоком (напр. links:)
-        if indented and isinstance(fm.get(cur_key), dict):
+        # вложенная пара "subkey: ..." под map-блоком (напр. links:)
+        if indent > 0 and isinstance(fm.get(cur_key), dict):
             fm[cur_key][key] = _parse_val(val) if val else []
+            cur_sub = None if val else key            # пустое значение → дальше блочные "- .."
             continue
+        # ключ верхнего уровня
+        cur_sub = None
         if not val:                                   # начало вложенного блока/списка
             cur_key = key
             fm[key] = {} if key == "links" else []
@@ -130,6 +145,21 @@ def parse_frontmatter(text: str) -> dict | None:
         cur_key = None
         fm[key] = _parse_val(val)
     return fm
+
+
+def _fm_link_targets(fm: dict | None):
+    """Типизированные связи из frontmatter `links:` → [(link_type, target), ...]."""
+    links = (fm or {}).get("links")
+    if not isinstance(links, dict):
+        return []
+    out = []
+    for ltype, targets in links.items():
+        if isinstance(targets, str):
+            targets = [targets]
+        for t in targets or []:
+            if isinstance(t, str) and t.strip():
+                out.append((ltype, t.strip()))
+    return out
 
 
 def cmd_lint(root: Path, paths: list | None = None) -> dict:
@@ -173,6 +203,16 @@ def cmd_lint(root: Path, paths: list | None = None) -> dict:
                 ext_out.add(rel)                       # существует, но вне docs/ — это связь, не сирота
             elif h0.endswith(".md"):
                 issues.append(("ERR", "I4", rel, _line_at(stripped, mt.start(1)), f"битая ссылка → {href}"))
+        # типизированные связи из frontmatter — тоже часть графа (I3) и проверяются на битость (I4)
+        for ltype, tgt in _fm_link_targets(fm_cache[rel]):
+            t = resolve_link(rel, tgt, known)
+            if t:                                      # ссылка на док внутри БЗ
+                outs.add(t)
+                in_links.setdefault(t, set()).add(rel)
+            elif _exists_on_disk(root, rel, tgt):
+                ext_out.add(rel)                       # ссылка на код/файл вне БЗ — это тоже связь
+            else:
+                issues.append(("ERR", "I4", rel, _fm_line(text, ltype), f"битая ссылка в links.{ltype} → {tgt}"))
         out_links[rel] = outs
 
     # README на каждую папку БЗ (I5) — находка уровня папки, строки нет
@@ -204,9 +244,10 @@ def cmd_lint(root: Path, paths: list | None = None) -> dict:
             issues.append(("WARN", "I2", rel, _fm_line(text, "status"), f"status='{st}' вне словаря"))
         # I3 — сироты (несущий тип без входящих/исходящих связей) — уровень документа
         if nt in LOAD_BEARING:
+            # связи из frontmatter уже учтены в out_links/in_links/ext_out (первый проход),
+            # поэтому битые ссылки больше НЕ маскируют сироту (раньше любой непустой links: глушил I3).
             has_link = bool(out_links.get(rel)) or bool(in_links.get(rel)) or (rel in ext_out)
-            links_fm = fm.get("links") if isinstance(fm.get("links"), dict) else {}
-            if not has_link and not links_fm:
+            if not has_link:
                 issues.append(("WARN", "I3", rel, 1, "сирота — нет связей (ни in, ни out)"))
         # I6 — supersedes-цель должна быть deprecated/archived
         links_fm = fm.get("links") if isinstance(fm.get("links"), dict) else {}

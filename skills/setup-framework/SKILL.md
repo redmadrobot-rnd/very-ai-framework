@@ -164,8 +164,8 @@ Bring the project to the contract:
   ```bash
   pip install pre-commit && pre-commit install
   ```
-  For the local `secret-scan` hook install `trufflehog`. Or without the hook — run
-  `pre-commit run` by hand before a commit (the agent variant).
+  Local secret gate is `detect-secrets` (pre-commit installs it; false positives → `.secrets.baseline`);
+  verified scan (`trufflehog`) runs in CI. No hook — run `pre-commit run` by hand (the agent variant).
 
 ## Step 6. Configure GitHub
 
@@ -188,7 +188,7 @@ Bring the project to the contract:
 3. **App config:** a `APP_DOTENV` Variable (a multiline `.env`) per environment;
    secret values — as separate Environment Secrets (e.g. `APP_SECRET`).
 4. **(opt.) @claude:** `CLAUDE_CODE_OAUTH_TOKEN` Secret (`claude setup-token`) +
-   install the "Claude" GitHub App. `@claude`/`@codex review` are triggered only by repo
+   install the "Claude" GitHub App. `@claude`/`@codex review`/`@codex answer` are triggered only by repo
    members (a guard on `author_association` in the workflow). **On PUBLIC repos be careful:**
    `@claude` pushes commits, `@codex` runs on self-hosted — don't expose them to forks/outsiders.
 5. Enable GitHub Actions; make sure `GITHUB_TOKEN` has `packages: write` (for GHCR).

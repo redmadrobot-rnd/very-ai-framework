@@ -18,12 +18,17 @@ As soon as the agent realizes a feature/fix per this procedure is coming, work m
 into an isolated worktree — and **continues only there**. The worktree isn't a step before
 coding, it's the container for the whole run: proposal, research, design, task breakdown
 and implementation all happen inside it. This gives clean parallelism between features and
-makes rollback = deleting the worktree. `main` is never touched at any stage. Two entry points:
-- **Start from scratch:** the human launches the session already isolated — `claude --worktree <feature>`.
-- **Agent already in a session (on `main`):** no need to restart itself — the agent switches
-  the session into a worktree on the fly with the **`EnterWorktree`** tool (a new branch under
-  `.claude/worktrees/<feature>`, the session CWD moves there). This skill is the project
-  instruction that authorizes the agent to move into a worktree once it recognizes a feature.
+makes rollback = deleting the worktree. `main` is never touched at any stage.
+
+**First action of the run — be in a worktree.** Before any proposal/research/code, check:
+
+```bash
+[ "$(git rev-parse --absolute-git-dir)" != "$(cd "$(git rev-parse --git-common-dir)" && pwd)" ]
+```
+
+True → already in a worktree, proceed. False → call **`EnterWorktree`** (new branch under
+`.claude/worktrees/<feature>`, session CWD moves there) and continue there. Either way, the
+rest of the run happens inside the worktree.
 
 At the end of the run the worktree is closed via `ExitWorktree` (`keep` — leave it, `remove` —
 delete it along with the branch).

@@ -1,13 +1,14 @@
-"""Codex PR reviewer — posts one GitHub review with inline comments.
+"""Codex PR reviewer — posts a live status comment, then fills it with the verdict.
 
 Flow:
-  1. compute the PR diff against the base branch;
-  2. ask `codex exec` for structured JSON findings (subscription auth on the runner);
-  3. keep only findings that land on a line actually present in the diff;
-  4. post a single PR review with inline threads + a summary body (verdict).
+  1. immediately post a placeholder comment ("анализирую… ⏳") so it's visible the job started;
+  2. compute the PR diff against the base branch;
+  3. ask `codex exec` for structured JSON findings (subscription auth on the runner);
+  4. keep only findings that land on a line actually present in the diff;
+  5. post inline threads as a PR review, and edit the placeholder into the summary (verdict).
 
 Findings that can't be anchored to a diff line, and any parse/post failure,
-degrade into a plain summary comment — the job never hard-fails on review noise.
+degrade into the summary comment — the job never hard-fails on review noise.
 
 Env (provided by the workflow):
   GH_TOKEN, REPO (owner/repo), PR_NUMBER, BASE_REF, HEAD_SHA
@@ -76,6 +77,17 @@ def gh_api(method: str, path: str, token: str, payload: dict | None = None) -> t
             return exc.code, {}
 
 
+def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
+    """Создать issue-коммент на PR. Возвращает его id (или None при ошибке)."""
+    status, data = gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token, {"body": body})
+    return data.get("id") if status < 300 else None
+
+
+def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
+    """Перезаписать тело ранее созданного issue-коммента."""
+    gh_api("PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body})
+
+
 def run(*args: str, **kwargs) -> str:
     return subprocess.run(args, capture_output=True, text=True, **kwargs).stdout
 
@@ -137,29 +149,42 @@ def main() -> None:
         base = base or info["base"]["ref"]
         head_sha = head_sha or info["head"]["sha"]
 
+    # Сразу постим коммент-заглушку — сигнал, что ревью стартовало; его же обновим вердиктом.
+    progress_id = post_comment(repo, pr, token, "🤖 **Codex review** — анализирую изменения, подождите… ⏳")
+
+    def finalize(text: str) -> None:
+        """Финальный результат — поверх заглушки (или новым комментом, если её создать не вышло)."""
+        if progress_id is not None:
+            edit_comment(repo, token, progress_id, text)
+        else:
+            post_comment(repo, pr, token, text)
+
     # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
     # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
-    subprocess.run(["git", "fetch", "origin", base], check=False)
-    subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], check=False)
+    fetch_base = subprocess.run(["git", "fetch", "origin", base], capture_output=True, text=True)
+    fetch_head = subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], capture_output=True, text=True)
+    if fetch_base.returncode or fetch_head.returncode:
+        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем, чтобы дефект был виден.
+        err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
+        finalize(f"🤖 Codex review: не смог получить изменения (git fetch упал).\n\n```\n{err}\n```")
+        sys.exit("git fetch failed")
     diff = run("git", "diff", f"origin/{base}...FETCH_HEAD").strip()
     if not diff:
-        gh_api(
-            "POST",
-            f"/repos/{repo}/issues/{pr}/comments",
-            token,
-            {"body": f"🤖 Codex review: изменений относительно `{base}` нет."},
-        )
+        finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
 
-    raw = run("codex", "exec", PROMPT + diff, timeout=600)
+    # codex обрабатывает недоверенный текст диффа (его пишет автор PR). Токен ему не нужен —
+    # убираем GH_TOKEN из окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
+    codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
+    try:
+        raw = run("codex", "exec", PROMPT + diff, timeout=600, env=codex_env)
+    except Exception as exc:  # noqa: BLE001 — любой сбой codex не должен оставить заглушку висеть
+        finalize(f"🤖 Codex review: не удалось выполнить codex.\n\n```\n{str(exc)[:1000]}\n```")
+        sys.exit(f"codex exec failed: {exc}")
+
     parsed = parse_codex_json(raw)
     if parsed is None:
-        gh_api(
-            "POST",
-            f"/repos/{repo}/issues/{pr}/comments",
-            token,
-            {"body": "🤖 **Codex review**\n\n" + raw.strip()[:60000]},
-        )
+        finalize("🤖 **Codex review**\n\n" + raw.strip()[:60000])
         return
 
     verdict = parsed.get("verdict", "lgtm")
@@ -182,23 +207,29 @@ def main() -> None:
         else:
             orphans.append(f)
 
-    body = build_summary(verdict, parsed.get("summary", ""), orphans)
-    review = {"commit_id": head_sha, "body": body, "event": "COMMENT", "comments": inline}
-    status, _ = gh_api("POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review)
+    summary = build_summary(verdict, parsed.get("summary", ""), orphans)
 
-    if status >= 300:
-        # inline anchoring rejected — fall back to a plain summary comment
+    # Inline-замечания по строкам — отдельным review (без них review создавать нельзя).
+    # Итоговый вердикт держим в коммент-заглушке, поэтому тело review — короткий указатель.
+    review_status = 200
+    if inline:
+        review = {
+            "commit_id": head_sha,
+            "body": "🤖 Codex review — построчные замечания ниже; итог в комментарии Codex.",
+            "event": "COMMENT",
+            "comments": inline,
+        }
+        review_status, _ = gh_api("POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review)
+
+    if review_status >= 300:
+        # привязка inline отклонена — складываем все находки в итоговый коммент
         all_findings = orphans + [
             {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]} for c in inline
         ]
-        gh_api(
-            "POST",
-            f"/repos/{repo}/issues/{pr}/comments",
-            token,
-            {"body": build_summary(verdict, parsed.get("summary", ""), all_findings)},
-        )
-        print(f"reviews API returned {status}; posted summary comment instead")
+        finalize(build_summary(verdict, parsed.get("summary", ""), all_findings))
+        print(f"reviews API returned {review_status}; put everything in summary comment")
     else:
+        finalize(summary)
         print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
 
 

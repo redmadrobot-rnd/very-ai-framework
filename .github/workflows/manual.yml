@@ -48,8 +48,11 @@ jobs:
         run: echo "tag=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push services
+        # inputs.service приходит через env (данные), а не вклеивается в текст скрипта —
+        # иначе значение со shell-синтаксисом исполнилось бы (script injection).
+        env:
+          INPUT: ${{ inputs.service }}
         run: |
-          INPUT="${{ inputs.service }}"
           for dir in services/*/; do
             svc=$(basename "$dir")
             if [ "$INPUT" = "all" ] || echo "$INPUT" | tr ',' '\n' | grep -qx "$svc"; then
@@ -82,14 +85,20 @@ jobs:
           target: "/srv/deploy/${{ inputs.environment }}"
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        # Все подстановки идут через env и пробрасываются в удалённый шелл (envs:),
+        # где раскрываются как данные — а не вклеиваются в текст script (script injection).
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_TAG: ${{ needs.build.outputs.tag }}
+          DEPLOY_SERVICE: ${{ inputs.service }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_TAG,DEPLOY_SERVICE
           script: >
-            bash /srv/deploy/${{ inputs.environment }}/.github/scripts/deploy.sh
-            ${{ inputs.environment }} ${{ github.repository }} ${{ needs.build.outputs.tag }} "${{ inputs.service }}"
+            bash "/srv/deploy/$DEPLOY_ENV/.github/scripts/deploy.sh"
+            "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICE"

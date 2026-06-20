@@ -48,7 +48,9 @@ jobs:
           fetch-depth: 0
 
       - name: Secret scan
-        uses: trufflesecurity/trufflehog@main
+        # Пин на неизменяемый commit-SHA (не плавающий @main): сторонний action в CI
+        # не должен менять поведение без коммита у нас. Обновлять осознанно.
+        uses: trufflesecurity/trufflehog@30d5bb91af1a771378349dbbb0c82129392acf70  # v3.95.6
         with:
           extra_args: --only-verified
 
