@@ -17,7 +17,7 @@ push в feature/*              Feature CI: static ‖ security ‖ light tests (
         │ открыть PR
         ▼
 PR в main                     PR CI: unit + integration tests → авто Codex review (inline)
-        │                     по запросу: «@codex review» / «@claude fix» в комментах
+        │                     по запросу: «@codex review» / «@codex answer …» / «@claude fix»
         │ зелёный CI + аппрув человека
         ▼
 merge в main                  собрать ТОЛЬКО изменённые образы → деплой на dev
@@ -34,7 +34,7 @@ release tag v*                собрать ВСЕ образы → депло�
 |---|---|
 | `.github/workflows/feature.yml` | Feature CI на push в `feature/**` |
 | `.github/workflows/pr.yml` | PR CI: тесты + авто Codex review |
-| `.github/workflows/codex-command.yml` | повторное Codex review по `@codex review` |
+| `.github/workflows/codex-command.yml` | Codex-команды в PR: `@codex review` / `@codex answer …` |
 | `.github/workflows/claude.yml` | `@claude` — правки по запросу |
 | `.github/workflows/push-main.yml` | merge в main → build изменённых → deploy dev |
 | `.github/workflows/release.yml` | tag `v*` → build всех → deploy prod |

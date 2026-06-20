@@ -1,8 +1,8 @@
-name: Codex review (on demand)
+name: Codex commands (on demand)
 
-# Повторное Codex-ревью по запросу: любой пишет "@codex review" в PR.
-# Автоматический проход — при открытии PR (см. pr.yml). Эта команда — для
-# свежего ревью после правок, когда человек его явно хочет.
+# Codex-команды в PR-комментарии:
+#   "@codex review" — свежее ревью после правок (авто-проход — при открытии PR, см. pr.yml);
+#   "@codex answer <вопрос>" — ответ Codex с контекстом PR и ветки комментариев (диалог).
 
 on:
   issue_comment:
@@ -32,3 +32,28 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.issue.number }}
         run: python3 .github/scripts/codex_review.py
+
+  codex-answer:
+    # Триггер: PR-коммент "@codex answer <вопрос>" от участника репо (OWNER/MEMBER/COLLABORATOR).
+    # БЕЗОПАСНОСТЬ: тот же self-hosted runner — НЕ пускай посторонних/форки.
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@codex answer') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: [self-hosted, codex]
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Answer in PR with Codex
+        # Текст вопроса идёт через env (данные), а не вклеивается в shell — без инъекции.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          QUESTION: ${{ github.event.comment.body }}
+        run: python3 .github/scripts/codex_answer.py
