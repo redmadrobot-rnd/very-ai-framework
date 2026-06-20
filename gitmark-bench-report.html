@@ -1,0 +1,121 @@
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gitmark — сравнительный бенчмарк версий</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0b0e14;--panel:#141925;--panel2:#1b2230;--bd:#262e3f;--fg:#e6e9ef;--mut:#8b93a7;--ac:#6366f1}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:40px 20px}
+.wrap{max-width:940px;margin:0 auto}
+header{border-bottom:1px solid var(--bd);padding-bottom:22px;margin-bottom:26px}
+h1{font-size:25px;letter-spacing:-.4px} .sub{color:var(--mut);margin-top:6px;font-size:14px}
+.tag{display:inline-block;background:var(--panel2);border:1px solid var(--bd);border-radius:6px;padding:2px 9px;font-size:12px;color:var(--mut);margin:4px 6px 0 0}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin:32px 0 13px}
+p.note{color:var(--mut);font-size:13.5px;margin:8px 0}
+.verdict{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.vc{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:16px;border-top:3px solid var(--mut)}
+.vc.tie{border-top-color:#64748b} .vc.win{border-top-color:#10b981} .vc.trade{border-top-color:#f59e0b}
+.vc b{font-size:14px} .vc .r{font-size:12.5px;color:var(--mut);margin-top:5px}
+.vc .badge{float:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.win .badge{color:#34d399} .tie .badge{color:#94a3b8} .trade .badge{color:#fbbf24}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-top:6px}
+th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--bd);font-size:13.5px}
+th{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+tr:last-child td{border-bottom:none}
+.old{color:var(--mut)} .new{color:#a5b4fc;font-weight:600}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-top:6px}
+.bar{display:flex;align-items:center;gap:12px;margin:7px 0}
+.bl{flex:0 0 120px;font-size:13px} .bt{flex:1;height:9px;background:#232b3b;border-radius:5px;overflow:hidden}
+.bf{display:block;height:100%;border-radius:5px} .bv{flex:0 0 88px;text-align:right;color:var(--mut);font-size:12.5px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;color:#a5b4fc;font-size:12px}
+.qt{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600}
+.qt.title{background:#1e2a44;color:#93c5fd} .qt.phrase{background:#10261c;color:#34d399} .qt.typo{background:#2e2410;color:#fbbf24}
+ul.m{list-style:none;background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:6px 0}
+ul.m li{padding:9px 16px;border-bottom:1px solid var(--bd);font-size:13.5px} ul.m li:last-child{border-bottom:none}
+ul.m b{color:#a5b4fc}
+footer{color:var(--mut);font-size:12px;margin-top:34px;border-top:1px solid var(--bd);padding-top:15px}
+</style></head><body>
+<div class="wrap">
+<header>
+<h1>gitmark: сравнительный бенчмарк версий</h1>
+<div class="sub">Прошлая (монолит + граф) против текущей (пакет <code>gm/</code>) · скорость и токены по 3 осям: сборка · вставка · точность поиска</div>
+<div style="margin-top:10px">
+<span class="tag">проект: neuraldeep-llm-proxy</span><span class="tag">59 запросов</span>
+<span class="tag">повторов: 7</span><span class="tag">tiktoken cl100k_base</span><span class="tag">2026-06-19</span></div>
+</header>
+
+<h2>Итог</h2>
+<div class="verdict">
+  <div class="vc tie"><span class="badge">паритет</span><b>Сборка</b><div class="r">833.4 мс (160 ф) vs 790.5 мс (151 ф). На чанк NEW 0.387 vs 0.423 мс — быстрее (нет графа), но индексирует больше.</div></div>
+  <div class="vc tie"><span class="badge">паритет</span><b>Вставка</b><div class="r">full-reindex у обеих (инкремента нет): 822.2 vs 878.9 мс.</div></div>
+  <div class="vc trade"><span class="badge">≈ / размен</span><b>Точность поиска</b><div class="r">hit@1 одинаков (88.1%). NEW чуть ниже hit@3 (91.5 vs 94.9%) — шире индекс → больше конкурентов на typo.</div></div>
+  <div class="vc win"><span class="badge">NEW −26%</span><b>Токены интерфейса</b><div class="r">2090 vs 2820 ток. контекста на взаимодействие. Payload поиска одинаков (323 ток).</div></div>
+</div>
+
+<h2>Методология</h2>
+<p class="note"><b>Скорость</b> — wall-clock (<code>perf_counter</code>), медиана 7 повторов, обе версии на одной копии БЗ в песочнице (оригинал не тронут).
+<b>Токены.</b> CLI <code>gitmark</code> детерминирован и <u>LLM-токенов не тратит</u> — поэтому «токены» считаем на агентном слое через tiktoken: (а) размер скилл/команд-файлов, что грузятся в контекст при работе агента; (б) payload поисковой выдачи, который агент читает. <b>Точность</b> — known-item retrieval: по документу строим 3 запроса и проверяем, на каком месте он находится.</p>
+
+<h2>Набор тестов — 59 запросов из реальных доков</h2>
+<p class="note">3 типа на документ: <span class="qt title">title</span> заголовок дока · <span class="qt phrase">phrase</span> фраза из тела · <span class="qt typo">typo</span> заголовок с опечаткой (проверка fuzzy/trigram). Цель — найти исходный документ. Примеры:</p>
+<table><thead><tr><th>тип</th><th>запрос</th><th>ожидаемый документ</th></tr></thead><tbody><tr><td><span class='qt title'>title</span></td><td>Build log · апрель 2026</td><td><code>docs/archive/build-log-2026-04.md</code></td></tr><tr><td><span class='qt phrase'>phrase</span></td><td>Hourly hit 3 часовой cooldown Weekly hit reset до понедельника 00 00</td><td><code>docs/archive/build-log-2026-04.md</code></td></tr><tr><td><span class='qt typo'>typo</span></td><td>Build log · апрлеь 2026</td><td><code>docs/archive/build-log-2026-04.md</code></td></tr><tr><td><span class='qt title'>title</span></td><td>Соглашение об обработке персональных данных посетителей сайта</td><td><code>docs/legal/personal-data-agreement.md</code></td></tr><tr><td><span class='qt phrase'>phrase</span></td><td>сбор запись систематизация накопление хранение уточнение обновление из</td><td><code>docs/legal/personal-data-agreement.md</code></td></tr><tr><td><span class='qt typo'>typo</span></td><td>Соглашение об обработке персонлаьных данных посетителей сайта</td><td><code>docs/legal/personal-data-agreement.md</code></td></tr></tbody></table>
+
+<h2>1 · Сборка индекса</h2>
+<table><thead><tr><th>метрика</th><th>прошлая</th><th>текущая</th></tr></thead><tbody>
+<tr><td>Время сборки (медиана)</td><td class="old">790.5 мс</td><td class="new">833.4 мс</td></tr>
+<tr><td>Файлов / чанков</td><td class="old">151 / 1868</td><td class="new">160 / 2154</td></tr>
+<tr><td>Время на чанк</td><td class="old">0.423 мс</td><td class="new">0.387 мс</td></tr>
+<tr><td>Граф связей</td><td class="old">строит (204)</td><td class="new">убран</td></tr>
+<tr><td>LLM-токены</td><td class="old">0</td><td class="new">0</td></tr>
+</tbody></table>
+<p class="note">Текущая по абсолюту чуть медленнее, потому что покрывает шире (160 vs 151 файла, +15% чанков); в пересчёте на чанк — быстрее, так как не тратится на построение графа.</p>
+
+<h2>2 · Вставка документа в базу</h2>
+<table><thead><tr><th>метрика</th><th>прошлая</th><th>текущая</th></tr></thead><tbody>
+<tr><td>Реиндекс после +1 документа</td><td class="old">878.9 мс</td><td class="new">822.2 мс</td></tr>
+<tr><td>Инкрементальная индексация</td><td class="old">нет → full rebuild</td><td class="new">нет → full rebuild</td></tr>
+</tbody></table>
+<p class="note">Обе версии при добавлении одного документа пересобирают индекс целиком — стоимость вставки ≈ стоимость полной сборки. Инкрементальная индексация — общая точка роста (не реализована ни там, ни там).</p>
+
+<h2>3 · Точность поиска</h2>
+<table><thead><tr><th>тип запроса</th><th>n</th><th colspan=2>прошлая · hit@1 / hit@3 / MRR</th></tr></thead><tbody>
+<tr><td>title</td><td>20</td><td class='old' colspan=2>85.0% / 90.0% / 0.875</td></tr><tr><td>phrase</td><td>19</td><td class='old' colspan=2>100.0% / 100.0% / 1.0</td></tr><tr><td>typo</td><td>20</td><td class='old' colspan=2>80.0% / 95.0% / 0.867</td></tr>
+<tr><td><b>текущая</b></td><td></td><td colspan=2></td></tr>
+<tr><td>title</td><td>20</td><td class='new' colspan=2>85.0% / 90.0% / 0.867</td></tr><tr><td>phrase</td><td>19</td><td class='new' colspan=2>100.0% / 100.0% / 1.0</td></tr><tr><td>typo</td><td>20</td><td class='new' colspan=2>80.0% / 85.0% / 0.847</td></tr>
+</tbody></table>
+<div class="card">
+<div class="bar"><span class="bl">OLD hit@1</span>
+    <span class="bt"><span class="bf" style="width:88%;background:#6366f1"></span></span>
+    <span class="bv">88.1%</span></div>
+<div class="bar"><span class="bl">NEW hit@1</span>
+    <span class="bt"><span class="bf" style="width:88%;background:#10b981"></span></span>
+    <span class="bv">88.1%</span></div>
+<div class="bar"><span class="bl">OLD hit@3</span>
+    <span class="bt"><span class="bf" style="width:95%;background:#6366f1"></span></span>
+    <span class="bv">94.9%</span></div>
+<div class="bar"><span class="bl">NEW hit@3</span>
+    <span class="bt"><span class="bf" style="width:92%;background:#10b981"></span></span>
+    <span class="bv">91.5%</span></div>
+</div>
+<p class="note">Phrase-запросы — 100% у обеих. hit@1 идентичен (88.1%). Разница только в typo-recall на hit@3 (прошлая 95.0% vs текущая 85.0%): текущая индексирует больше доков, и пара typo-целей сместилась с 3-го на 4-е место. Латентность: 12.42 vs 13.38 мс/запрос.</p>
+
+<h2>Токены интерфейса (контекст агента)</h2>
+<table><thead><tr><th>файл</th><th>прошлая</th><th>файл</th><th>текущая</th></tr></thead><tbody>
+<tr><td>kb-search SKILL</td><td class="old">1238</td><td>kb-search SKILL</td><td class="new">353</td></tr>
+<tr><td>kb-curate SKILL</td><td class="old">1237</td><td>kb-curate SKILL</td><td class="new">764</td></tr>
+<tr><td>/kb command</td><td class="old">345</td><td>/doc + /onto-doc</td><td class="new">973</td></tr>
+<tr><td><b>Итого</b></td><td class="old"><b>2820</b></td><td><b>экономия</b></td><td class="new"><b>2090 (−26%)</b></td></tr>
+</tbody></table>
+<p class="note">Несмотря на лишнюю команду (2 vs 1), текущая раскладка на 26% легче по контексту — за счёт похудевших скиллов (модель в ontology.md, скиллы — процедура без дублей). Это прямая экономия токенов на каждом обращении агента к БЗ.</p>
+
+<h2>Вывод</h2>
+<ul class="m">
+<li><b>Скорость — паритет.</b> Сборка/вставка в пределах десятков мс; на чанк текущая эффективнее (нет графа). Регрессии нет.</li>
+<li><b>Точность — паритет с честным разменом.</b> hit@1 одинаков, phrase 100%, текущая чуть слабее на typo hit@3 из-за более широкого индекса. Не значимо для практики.</li>
+<li><b>Токены — выигрыш текущей (−26%).</b> Интерфейс легче по контексту; payload выдачи одинаков. CLI-операции LLM-токенов не тратят вовсе.</li>
+<li><b>Сверх метрик:</b> текущая — модульный код (5 файлов vs монолит ~760 строк), шире и честнее охват (поймала битую ссылку), без графа/ANSI/хардкода сервисов.</li>
+<li><b>Общая точка роста:</b> инкрементальная индексация — ни одна версия не умеет; вставка стоит полной пересборки.</li>
+</ul>
+
+<footer>Метод: обе версии прогнаны на копии репозитория в песочнице (оригинал не изменён), 7 повторов на замер, tiktoken cl100k_base. Бенч-данные собраны 2026-06-19.</footer>
+</div>
+</body></html>

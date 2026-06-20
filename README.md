@@ -1,102 +1,45 @@
-# ai-framework-cicd
+<p align="center">
+  <img src="docs/assets/logo.png" alt="very-ai-framework" width="400">
+</p>
 
-Универсальный CI/CD для контейнерных проектов на GitHub Actions.
-Подходит любому репозиторию, где сервисы лежат в `services/<имя>/` (каждый со своим
-`Dockerfile`) и собираются через `docker-compose.yml`. Имена сервисов, порты и
-конфиг нигде не захардкожены — пайплайн обнаруживает сервисы сам.
+# very-ai-framework
 
-Модель ветвления: **GitHub Flow + release-теги**.
+Фреймворк для **агентной разработки поверх репозитория**: процесс работы с Claude Code агентом, 
+формат ведения технической документации и CI/CD, собранные так, чтобы агент вёл фичу от идеи до прода вместе с
+человеком. Три части, и они вложены по смыслу — **dev-flow** это основа процесса, а **KB** и **CI/CD** — возможности, которые он использует.
 
-> Это **референс-репозиторий**: только пайплайн, без приложения. Свои сервисы кладёшь
-> в `services/<имя>/`. Развернуть пайплайн в свой проект — раздел ниже и `skills/setup-cicd/`.
 
-## Как это работает
+> Это **референс-репозиторий**: сам фреймворк, без прикладного приложения. 
+> Содержит всю необходимую инфраструктуру, чтобы агент мог развернуть пайплайн в другом репозитории и вести его разработку.
+>
+> Методология фреймворка — в [Miro](https://miro.com/app/board/uXjVHHc75W4=/).
 
-```
-pre-commit (локально)         ruff + тесты + скан секретов; падение → не коммитим
-        │ commit + push
-        ▼
-push в feature/*              Feature CI: static ‖ security ‖ light tests (быстро, без сборки)
-        │ открыть PR
-        ▼
-PR в main                     PR CI: unit + integration tests → авто Codex review (inline)
-        │                     по запросу: «@codex review» / «@claude fix» в комментах
-        │ зелёный CI + аппрув человека
-        ▼
-merge в main                  собрать ТОЛЬКО изменённые образы → деплой на dev
-        │
-        ▼
-release tag v*                собрать ВСЕ образы → деплой на prod
-```
-
-## Засетапить агентом
+## Засетапить фреймворк агентом
 
 В **целевом** репозитории запусти агента (Claude Code) и поставь задачу — он сам изучит
 проект, перенесёт файлы и настроит:
 
-- если установлен скилл `/setup-cicd` (как — в самом низу) — просто вызови его;
+- если скилл `/setup-framework` доступен (поставь репо как плагин или скопируй
+  `skills/setup-framework/` в `~/.claude/skills/`) — просто вызови его;
 - иначе — текстом, указав шаблон:
 
-  > Разверни CI/CD по шаблону `github.com/virrius/ai-framework-cicd`
-  > (инструкция — `skills/setup-cicd/SKILL.md` в нём). Целевой репозиторий — текущий.
+  > Разверни CI/CD по шаблону `github.com/virrius/very-ai-framework`
+  > (инструкция — `skills/setup-framework/SKILL.md` в нём). Целевой репозиторий — текущий.
 
 Дальше агент по «Шагу 0» сам спросит недостающее: стенды и `SSH_HOST`/`SSH_USER`,
-доступы, нужен ли Codex-ревью (подписка/API) и `@claude`. Подготовь заранее: сервер с
-Docker и SSH-доступом и GitHub-токен с правами на **secrets** и **environments**.
+доступы, нужен ли Codex-ревью (подписка/API) и `@claude`. Подготовь заранее(а ещё лучше попроси агента это сделать):
+сервер с Docker и SSH-доступом и GitHub-токен с правами на **secrets** и **environments**.
+Подробности пайплайна — в [CICD.md](CICD.md).
 
-## Что в репозитории
+## Структура репозитория
 
-| Путь | Назначение |
-|---|---|
-| `.github/workflows/feature.yml` | Feature CI на push в `feature/**` |
-| `.github/workflows/pr.yml` | PR CI: тесты + авто Codex review |
-| `.github/workflows/codex-command.yml` | повторное Codex review по `@codex review` |
-| `.github/workflows/claude.yml` | `@claude` — правки по запросу |
-| `.github/workflows/push-main.yml` | merge в main → build изменённых → deploy dev |
-| `.github/workflows/release.yml` | tag `v*` → build всех → deploy prod |
-| `.github/workflows/manual.yml` | ручной build+deploy (`workflow_dispatch`) |
-| `.github/scripts/codex_review.py` | Codex-ревьюер (JSON-находки → inline-review) |
-| `.github/scripts/services.sh` | динамическое обнаружение сервисов (`services/*`) |
-| `.github/scripts/deploy.sh` | деплой по SSH (login GHCR + docker compose) |
-| `services/<имя>/` | твои сервисы (каждый — со своим `Dockerfile`); в шаблоне их нет |
-| `docker-compose.example.yml` | образец compose — скопируй в `docker-compose.yml` под свои сервисы |
-| `pyproject.toml` | конфиг ruff + pytest (маркер `heavy`) |
-| `AGENTS.md` | правила для кодового агента при разработке |
-| `skills/setup-cicd/` | скилл: развернуть этот CICD в другом репозитории |
-
-## Конфиг и секреты
-
-Хранятся в **GitHub → Settings → Environments** (`dev`, `prod`, …), резолвятся
-по окружению автоматически:
-
-- **Variables** — несекретный конфиг: `SSH_HOST`, `SSH_USER` (видно, какой сервер
-  к какому стенду), вся `.env` приложения — в одной переменной `APP_DOTENV`.
-- **Secrets** — чувствительное: `SSH_KEY` (приватный ключ), прочие ключи/токены.
-
-Деплой собирает `.env` из этих значений и прокидывает его в контейнеры через `env_file`.
-
-## Self-hosted runner для Codex-ревью (развёртывание)
-
-Codex-ревью (`pr.yml` → `codex-review`, `codex-command.yml`) выполняется на
-self-hosted runner'е, авторизованном **подпиской ChatGPT** (а не API-ключом).
-Раннер разворачивается **один раз** на доверенном сервере и может обслуживать
-несколько репозиториев (через регистрацию на организацию).
-
-1. Поставить на сервер: `docker`, `gh`, `python3`, Node (для Codex CLI и раннера).
-2. Вход Codex подпиской:
-   ```bash
-   npm i -g @openai/codex
-   codex login --device-auth      # открыть ссылку, ввести код, войти ChatGPT-аккаунтом
-   ```
-   Появится `~/.codex/auth.json` (`"auth_mode": "chatgpt"`). Обращаться как с паролем;
-   токен сам рефрешится; один раннер — задачи последовательно (не шарить файл между
-   параллельными джобами/машинами).
-3. Зарегистрировать GitHub Actions runner с лейблами **`self-hosted,codex`**
-   (Settings → Actions → Runners → New self-hosted runner) и запустить как сервис
-   (`./svc.sh install && ./svc.sh start`).
-4. Убедиться, что доступен `docker login ghcr.io` (приватные образы).
-
-После этого джобы с `runs-on: [self-hosted, codex]` сами подхватят раннер.
-Если подписка не нужна — можно переписать ревью на `openai/codex-action` +
-`OPENAI_API_KEY` (биллинг по API).
-
+| Путь | Часть | Назначение |
+|---|---|---|
+| `.github/workflows/`, `.github/scripts/` | CI/CD | воркфлоу и скрипты пайплайна |
+| `skills/setup-framework/` | Setup | инсталлер: разворачивает **весь** фреймворк в другом репо. В корне (**не** в `.claude/`) — не догфуд, в проект не копируется |
+| `.claude/skills/dev-flow/`, `.claude/skills/task-breakdown/` | Dev-flow | скиллы процесса разработки |
+| `.claude/skills/kb-search/`, `.claude/skills/kb-maintain/` | KB | поиск и ведение базы знаний (GitMark) |
+| `.claude/commands/` | KB | команды `/doc`, `/kb-build`, `/kb-graph` |
+| `docs/gitmark/` | KB | база знаний прикладного проекта (`ontology.md` — спека модели) |
+| `CLAUDE.md` | Dev-flow | правила разработки для кодового агента |
+| `pyproject.toml` | CI/CD | конфиг ruff + pytest |
