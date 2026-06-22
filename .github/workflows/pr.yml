@@ -48,14 +48,13 @@ jobs:
           exit $rc
 
   codex-review:
-    # Автоматический Codex-ревью после тестов — только при ОТКРЫТИИ PR
-    # (не на каждый push, чтобы не жечь квоту подписки).
-    # Повторное ревью — по команде "@codex review" (см. codex-command.yml).
-    # skip:ai-review — опциональный опт-аут даже на открытии.
+    # Отключённый по дефолту action - Особенно для публичных репозиториев есть риск попадания вредоносных инструкций в PR
+    # Включить — убрать строку `false &&`
     needs: [unit-tests, integration-tests]
     if: >
+      false &&
       github.event.action == 'opened' &&
-      !contains(github.event.pull_request.labels.*.name, 'skip:ai-review')
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, codex]
     permissions:
       pull-requests: write
@@ -63,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
       - name: Review PR with Codex (subscription)
         env:

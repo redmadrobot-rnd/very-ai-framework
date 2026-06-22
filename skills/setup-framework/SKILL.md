@@ -196,7 +196,7 @@ Bring the project to the contract:
    **required status checks** — `unit-tests`, `integration-tests` (they run on PR), so a red
    CI can't be merged. `static`/`security` run on push to `feature` (if you want to require
    them on PR too — add a `pull_request` trigger to them). Don't put `codex-review` in required —
-   it's on self-hosted and only on PR open.
+   it's a disabled action (`if: false` in `pr.yml`) and on self-hosted.
    **Important:** on a **private** repo, branch protection / rulesets require a
    **GitHub Pro/Team/Enterprise** plan — on the free plan the API returns 403 "Upgrade to Pro or make
    public". Then it's either a plan upgrade, a public repo, or living without an enforced gate
@@ -204,7 +204,8 @@ Bring the project to the contract:
 
 ## Step 7. Codex review: connect it to the runner
 
-Codex review (`pr.yml` → `codex-review`, `codex-command.yml`) runs on a
+Codex review (`codex-command.yml` on-demand via `@codex …`; the auto-pass in
+`pr.yml` is a disabled action, `if: false`) runs on a
 self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT subscription).
 
 - **If such a runner is already deployed** (shared / in another org repository) —

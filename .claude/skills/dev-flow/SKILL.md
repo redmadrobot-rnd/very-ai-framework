@@ -73,7 +73,7 @@ update tasks/specs → e2e → try it locally → performance. Interaction rules
 
 ## 7. pre-commit → CI/PR — automation, the agent only reacts
 Locally before a commit: `ruff`, tests, secret scan — **any step fails → don't commit,
-fix it**, don't bother the human. Then push → feature CI, PR → tests + auto Codex review.
+fix it**, don't bother the human. Then push → feature CI, PR → tests; Codex review on demand (`@codex review`).
 On Codex comments (severity high/medium) and on the `@claude` tag the agent makes the edits.
 
 ## 8. Review and deploy — the human has the final word
