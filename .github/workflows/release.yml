@@ -47,7 +47,10 @@ jobs:
             ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:stable
 
   deploy-prod:
-    needs: build
+    needs: [discover, build]
+    # Нет сервисов — деплоить нечего, на прод-сервер не идём (как в push-main.yml).
+    # Без этого guard'а пустая matrix в build не остановила бы deploy-prod.
+    if: ${{ needs.discover.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     environment: prod
     steps:
