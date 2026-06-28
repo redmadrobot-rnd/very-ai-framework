@@ -107,20 +107,14 @@ self-hosted runner'е, авторизованном **подпиской ChatGPT
 
 Правки по запросу (`@claude …`, в т.ч. `@claude fix …`) выполняет
 **`anthropics/claude-code-action`** в `claude.yml`. В отличие от Codex он крутится на
-**GitHub-hosted `ubuntu-latest`**, а не на self-hosted. Это намеренно: Claude здесь —
-**пишущий агент с живым шеллом**, обрабатывающий недоверенный код PR; одноразовая
-GitHub-VM безопаснее персистентного сервера (успешная prompt-injection не закрепится на
-машине и не дотянется до чужих секретов). Codex же — read-only-аналитик в сэндбоксе,
-ему self-hosted подходит. Гнать оба на одну машину «для симметрии» не нужно.
+**GitHub-hosted `ubuntu-latest`**.
 
-Триггер: `@claude` в комментарии PR/issue от участника репо
-(`author_association` ∈ OWNER/MEMBER/COLLABORATOR) — посторонний с форка не запустит.
 В PR Claude коммитит правки **прямо в head-ветку этого PR**; в обычном issue (ветки нет) —
 заводит новую ветку и открывает PR.
 
-Аутентификация **двухконтурная**, и для работы нужны **все три** условия:
+Аутентификация
 
-1. **GitHub App «claude» установлен на репозиторий** — <https://github.com/apps/claude>
+1. **GitHub App «claude» установить на репозиторий** — <https://github.com/apps/claude>
    → Install → выбрать аккаунт/организацию → отметить нужный репо. Через installation-token
    этого App экшен делает все GitHub-операции (читать тред, постить комменты, **пушить
    коммит в ветку PR**); он же держит право `Contents: write`. Настройки потом —
@@ -128,33 +122,8 @@ GitHub-VM безопаснее персистентного сервера (ус
 2. **OAuth-токен подписки в секретах репо.** Сгенерировать в своём терминале
    `claude setup-token` (вход в браузере → строка `sk-ant-oat01-…`, печатается только в TTY)
    и положить как **Repository secret** `CLAUDE_CODE_OAUTH_TOKEN` (Settings → Secrets and
-   variables → Actions → Secrets). Им аутентифицируется **модель** (расходует квоту твоей
-   подписки). Для тяжёлого CI Anthropic рекомендует API-ключ вместо подписки.
-3. **`permissions: id-token: write`** в `claude.yml`. Экшен получает GitHub **OIDC**-токен
-   и меняет его на installation-token App; без этого права старт падает.
+   variables → Actions → Secrets).
 
 > Без секрета (п.2) job завершается **зелёным, но молча**: шаг Claude скипается по
-> `if: env.CLAUDE_CODE_OAUTH_TOKEN != ''`. Это «фича» (репо без токена не краснеет), но
-> легко принять за «работает».
+> `if: env.CLAUDE_CODE_OAUTH_TOKEN != ''`.
 
-### Диагностика типичных ошибок
-
-| Симптом в логах / поведение | Причина | Что сделать |
-|---|---|---|
-| Job зелёный, но Claude не отвечает; шаг Claude = *skipped* | Нет секрета `CLAUDE_CODE_OAUTH_TOKEN` | Добавить секрет (п.2) |
-| `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL` / `Could not fetch an OIDC token` | Нет `id-token: write` | Добавить право (п.3) |
-| `App token exchange failed: 401 — Claude Code is not installed on this repository` | App не установлен на репо | Установить App (п.1) |
-| На один коммент — **два** прогона, второй *skipped* | GitHub переоткрыл событие на собственный коммент Claude; guard его отсёк | Норма, ничего не делать |
-
-> **Не путать с Connectors.** «Connectors» в приложении **claude.ai** (Settings →
-> Connectors) — это интеграции веб-/десктоп-чата с твоими Drive/GitHub/Notion **во время
-> разговора**, привязанные к твоему личному аккаунту. К `@claude` в CI они отношения **не
-> имеют** и для него **не нужны** — настройка раннера это только три пункта выше.
-
-## Развернуть такой же CICD в другом проекте
-
-Процедура — в скилле [`skills/setup-framework/SKILL.md`](skills/setup-framework/SKILL.md):
-агент изучает целевой репо, переносит файлы из шаблона по URL, настраивает GitHub и
-сервер. SKILL.md самодостаточен — его можно просто дать агенту как инструкцию.
-
-Как сделать скилл вызываемым (`/setup-framework`) — см. [README.md](README.md#установка-скиллов).
