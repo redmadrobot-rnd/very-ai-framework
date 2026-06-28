@@ -16,8 +16,8 @@ jobs:
       # Прод-деплой только с тега, указывающего на проверенный main.
       - name: Tag must point at main
         run: |
-          git fetch origin main --quiet
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main \
             || { echo "::error::tag ${GITHUB_REF_NAME} is not on main"; exit 1; }
 
   discover:
