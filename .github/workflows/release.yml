@@ -5,12 +5,24 @@ on:
     tags:
       - "v*"
 
-env:
-  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
-
 jobs:
-  discover:
+  verify-tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must point at main
+        run: |
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main \
+            || { echo "::error::tag ${GITHUB_REF_NAME} is not on main"; exit 1; }
+
+  discover:
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       services: ${{ steps.s.outputs.services }}
     steps:
@@ -19,16 +31,21 @@ jobs:
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: discover
+    needs: [verify-tag, discover]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         service: ${{ fromJson(needs.discover.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
+
+      - id: img
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -42,17 +59,24 @@ jobs:
         with:
           context: services/${{ matrix.service }}
           push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           tags: |
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.ref_name }}
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:stable
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ github.ref_name }}
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:stable
 
   deploy-prod:
     needs: [discover, build]
-    # Нет сервисов — деплоить нечего, на прод-сервер не идём (как в push-main.yml).
-    # Без этого guard'а пустая matrix в build не остановила бы deploy-prod.
     if: ${{ needs.discover.outputs.services != '[]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: prod
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +89,7 @@ jobs:
           if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> .env; fi
 
       - name: Copy compose + deploy script + env
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
@@ -74,7 +98,7 @@ jobs:
           target: "/srv/deploy/prod"
 
       - name: Deploy all services to prod
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

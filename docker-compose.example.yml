@@ -1,19 +1,24 @@
 # ОБРАЗЕЦ. Скопируй в docker-compose.yml и опиши свои сервисы.
-# Контракт, на который завязан деплой:
-#   образ    = ghcr.io/${GITHUB_REPOSITORY}/<сервис>:${TAG}
-#   env_file = .env   (его собирает деплой из конфига окружения)
-# Порты/реплики/прочее — на усмотрение проекта.
+# Контракт деплоя: образ = ${IMAGE_PREFIX}/<сервис>:${TAG} (IMAGE_PREFIX задаёт deploy.sh,
+# в нижнем регистре); env_file = .env. healthcheck желателен — deploy.sh делает `up -d --wait`,
+# без healthcheck деплой ждёт только running, а не healthy.
 services:
   api:
-    image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}
+    image: ${IMAGE_PREFIX}/api:${TAG:-latest}
     env_file:
       - .env
     ports:
       - "8080:8080"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   worker:
-    image: ghcr.io/${GITHUB_REPOSITORY}/worker:${TAG:-latest}
+    image: ${IMAGE_PREFIX}/worker:${TAG:-latest}
     env_file:
       - .env
     restart: unless-stopped

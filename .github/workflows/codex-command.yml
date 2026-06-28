@@ -20,6 +20,7 @@ jobs:
       contains(github.event.comment.body, '@codex review') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
+    timeout-minutes: 20
     permissions:
       pull-requests: write
       contents: read
@@ -43,6 +44,7 @@ jobs:
       contains(github.event.comment.body, '@codex answer') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
+    timeout-minutes: 20
     permissions:
       pull-requests: write
       contents: read
@@ -69,6 +71,7 @@ jobs:
       contains(github.event.comment.body, '@codex answer') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
+    timeout-minutes: 20
     permissions:
       pull-requests: write
       contents: read

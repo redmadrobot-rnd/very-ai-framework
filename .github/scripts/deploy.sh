@@ -18,6 +18,11 @@ SERVICES="${4:-}"
 [ "$SERVICES" = "all" ] && SERVICES=""
 SERVICES="${SERVICES//,/ }"
 
+if ! [[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+  echo "invalid environment: '$ENVIRONMENT'" >&2
+  exit 1
+fi
+
 DIR="/srv/deploy/${ENVIRONMENT}"
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
@@ -25,11 +30,12 @@ echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 mkdir -p "$DIR"
 cd "$DIR"
 export GITHUB_REPOSITORY="$REPO" TAG="$TAG"
-export COMPOSE_PROJECT_NAME="$ENVIRONMENT"   # изоляция стендов — имя окружения, без хардкода
+export IMAGE_PREFIX="ghcr.io/${REPO,,}"
+export COMPOSE_PROJECT_NAME="$ENVIRONMENT"
 
 echo "deploy [$ENVIRONMENT] tag=$TAG services='${SERVICES:-all}'"
 # shellcheck disable=SC2086
 docker compose pull $SERVICES
 # shellcheck disable=SC2086
-docker compose up -d $SERVICES
+docker compose up -d --wait --wait-timeout 300 $SERVICES
 docker compose ps

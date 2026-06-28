@@ -21,6 +21,7 @@ jobs:
       contains(github.event.comment.body, '@claude') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
@@ -29,7 +30,7 @@ jobs:
           fetch-depth: 0
       - name: Claude
         if: env.CLAUDE_CODE_OAUTH_TOKEN != ''
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464  # v1.0.159
         with:
           # OAuth-токен подписки Claude Pro/Max вместо API-ключа.
           # Сгенерировать: `claude setup-token` (формат sk-ant-oat01-...).
