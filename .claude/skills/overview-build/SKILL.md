@@ -1,0 +1,94 @@
+---
+name: overview-build
+description: >
+  Generate the project's release "overview" content — two strict dark onepagers (Overview for a
+  less-technical audience, Tech for engineers with HLD/PlantUML architecture and changelog) — from
+  the knowledge base, the code at the release tag, git history, and the developer's
+  overview.rules.md. Edit files under .overview/; CI publishes them to the orphan `overview` branch
+  and to GitHub Pages. Run on release.
+---
+
+# overview-build — собрать контент overview-сайта на релизе
+
+Ты готовишь **контент** overview-сайта. Внешний вид и сборка — не твоя забота: строгий тёмный
+шаблон (`.overview/template/`) и детерминированный рендер (`overview_render.py`) собирают HTML сами.
+Сайт — **две страницы-onepager'а** по аудитории, обе генерятся из одних и тех же файлов:
+
+- **Overview** (`index.html`) — менее техническая, для стейкхолдера/нового человека «с порога»:
+  суть, статус, возможности, метрики, окружения, refs, owner.
+- **Tech** (`tech.html`) — для инженера: архитектура (PlantUML) + потоки, интерфейсы, запуск,
+  стек, changelog, оговорки.
+
+## Модель веток (важно понять)
+- **Входы человека** (на `main`): `.overview/overview.rules.md` — ТЗ; `.overview/template/` — скелет.
+- **Твои выходы**: `.overview/{onepager.md, hld.md, changelog.md, architecture/*.puml}`.
+- В CI прошлые твои выходы уже подложены в воркспейс с ветки `overview` (baseline для дрейфа).
+- **Ты только правишь файлы. НЕ коммить и не пушь** — публикацию на ветку `overview` и Pages делает CI.
+
+## Шаги
+
+1. **Прочитай ТЗ.** `.overview/overview.rules.md` — что обязательно показать, что скрыть, ссылки,
+   акценты. Это директивы. Ничего из «скрыть» на сайт не выноси (Pages публичен по URL).
+2. **Собери факты.** База знаний (`/kb-search`, `docs/gitmark/`), README, конфиги, `services/`.
+   Определи: назначение, статус, стек, компоненты, внешние интерфейсы, как запускается.
+3. **Диапазон релиза.** Тег — в промпте (напр. `v1.3.0`). Предыдущий: `git tag --sort=-v:refname`.
+   Изменения: `git log <prev>..<tag>` + связанные PR.
+4. **`onepager.md`** — фронтматтер с полями ниже (поля питают обе страницы). `updated` = дата релиза,
+   `version` = тег.
+5. **`hld.md` + `architecture/*.puml`** (Tech-страница):
+   - `.puml` — **source of truth, правь на дрейфе**: сверь с кодом, меняй только при реальном
+     изменении архитектуры; иначе оставь (стабильность важнее). Нет диаграмм — создай минимум
+     System Context + Container (C4-стиль). Подписи на диаграммах — лучше латиницей или короткими
+     терминами (надёжнее рендерятся), кириллица допустима.
+   - `hld.md` — краткая сводка: компоненты и потоки данных к диаграммам.
+6. **`changelog.md`** — добавь секцию релиза **сверху** (формат ниже). Пиши по-человечески, вычленяй
+   ключевое, прошлые секции не трогай.
+7. Самопроверка: «обязательно показать» на месте, «скрыть» отсутствует, даты/версии верны.
+
+## Формат `onepager.md`
+Все поля опциональны (рендер пропускает пустые). Что куда идёт — помечено `[O]` Overview / `[T]` Tech.
+
+```markdown
+---
+title: Speech Core AI                 # [O+T] имя
+tagline: Транскрипция аудио/видео ...  # [O+T] одна строка-суть
+status: MVP / demo stand              # [O+T] бейдж
+version: v1.3.0                       # [O+T] бейдж
+updated: 12.03.26                     # [O+T] бейдж
+summary: >                            # [O] 2–3 предложения: что и зачем
+  Система для транскрипции ...
+capabilities:                         # [O] ключевые возможности
+  - Реализована на базе пайпов WhisperX
+metrics:                              # [O] масштаб/производительность
+  - 10x юзеров, файлы до 2гб
+interfaces:                           # [T] API/интеграции/внешние интерфейсы
+  - REST API (FastAPI) — загрузка, экспорт, шеринг
+run:                                  # [T] как запустить / точки входа
+  - docker compose up -d
+techstack:                            # [T] стек по группам (правый рельс)
+  Frontend:
+    note: VibeCoded!                  # опц. пометка справа от группы
+    items: [Vue 3, Vite]
+  Backend: [Python 3.12, FastAPI, WhisperX]
+environments:                         # [O+T] окружения
+  - {name: prod, url: https://...}
+refs:                                 # [O+T] ссылки
+  - {label: Репо, url: https://...}
+owner: "@virrius (https://t.me/virrius)"   # [O] холдер/контакт
+caveats:                              # [T] важные оговорки, форки, gotchas
+  - Имеет форк LoqosMeet ...
+---
+```
+
+## Формат `hld.md` и `changelog.md`
+`hld.md` — обычный markdown (заголовки/абзацы/списки), идёт в раздел «Архитектура» Tech-страницы.
+`changelog.md` — секции по версиям, самая свежая сверху (рендер подсветит её как «последний»):
+
+```markdown
+## v1.3.0 — 12.03.26
+**Added** — RealTime-транскрипция микрофона; AI-саммари.
+**Fixed** — падение экспорта на файлах > 1гб.
+
+## v1.2.0 — 01.02.26
+**Added** — шеринг транскрипций по ссылке.
+```

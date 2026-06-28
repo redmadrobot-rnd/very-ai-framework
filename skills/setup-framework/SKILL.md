@@ -137,12 +137,30 @@ Add or update a single doc later with **`/kb-doc <topic>`**.
 
 ```bash
 mkdir -p .github/workflows .github/scripts
-cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
+cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual,overview}.yml .github/workflows/
 cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
+cp /tmp/aifw-template/.github/scripts/overview_{render.py,publish.sh,restore.sh} .github/scripts/
 cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
 ```
 
 Don't copy the template's `README.md` / `CICD.md` blindly — the target project has its own.
+
+**Overview-on-release site.** `overview.yml` builds a GitHub Pages site on each `v*` tag: an
+agent (the `overview-build` skill, copied in Step 2) writes the onboarding onepager + HLD +
+changelog from the KB and git history; CI renders them to static HTML and publishes. Scaffold
+the **human inputs** (the generated outputs live on an orphan `overview` branch, not here):
+
+```bash
+mkdir -p .overview/template .overview/architecture
+cp /tmp/aifw-template/.overview/overview.rules.md .overview/
+cp /tmp/aifw-template/.overview/template/* .overview/template/
+grep -qxF '.overview/site/' .gitignore || echo '.overview/site/' >> .gitignore
+```
+
+Then fill in `.overview/overview.rules.md` with the project's links/accents (it's the developer's
+spec for the site). The `overview` branch and `overview/<tag>` snapshot tags are created by CI on
+first release — nothing to set up by hand. Needs `CLAUDE_CODE_OAUTH_TOKEN` (same as `@claude`); if
+absent, the workflow no-ops with a notice.
 
 Bring the project to the contract:
 - Each service is a `services/<name>/` directory with a `Dockerfile`.
@@ -192,6 +210,8 @@ Bring the project to the contract:
    members (a guard on `author_association` in the workflow). **On PUBLIC repos be careful:**
    `@claude` pushes commits, `@codex` runs on self-hosted — don't expose them to forks/outsiders.
 5. Enable GitHub Actions; make sure `GITHUB_TOKEN` has `packages: write` (for GHCR).
+   For the overview site: **Settings → Pages → Source = GitHub Actions** (the `overview.yml`
+   workflow publishes via `deploy-pages`; no `gh-pages` branch needed).
 6. **Branch protection** (Settings → Branches → rule for `main`): require a PR and
    **required status checks** — `unit-tests`, `integration-tests` (they run on PR), so a red
    CI can't be merged. `static`/`security` run on push to `feature` (if you want to require

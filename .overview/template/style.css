@@ -1,0 +1,90 @@
+/* Overview onepager — нейтрально-тёмная тема, строго, без красивостей. Ноль внешних зависимостей. */
+:root {
+  --bg: #1c1f24;          /* нейтральный тёмный фон */
+  --panel: #23272e;       /* приподнятые блоки */
+  --fg: #e4e6eb;          /* основной текст */
+  --muted: #9aa1ac;       /* вторичный текст */
+  --line: #343941;        /* границы */
+  --accent: #6ea8c7;      /* единственный акцент */
+  --vibe: #d98a8a;        /* пометка-выделение */
+  --maxw: 920px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.55;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+/* Sticky header */
+header.bar {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(28,31,36,0.92);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+}
+header.bar .wrap { display: flex; align-items: baseline; gap: 20px; height: 52px; }
+header.bar .name { font-weight: 700; font-size: 15px; margin-right: auto; }
+header.bar nav { display: flex; gap: 18px; }
+header.bar nav a { color: var(--muted); font-size: 14px; }
+header.bar nav a:hover { color: var(--fg); text-decoration: none; }
+header.bar nav a.active { color: var(--fg); border-bottom: 2px solid var(--accent); }
+
+/* Hero */
+.hero { padding: 40px 0 8px; }
+.hero h1 { font-size: 32px; margin: 0 0 6px; letter-spacing: -0.5px; }
+.hero .tagline { font-size: 17px; color: var(--muted); margin: 0 0 16px; max-width: 720px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.badge {
+  display: inline-block; font-size: 12.5px; padding: 3px 11px;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+}
+.badge.status { color: var(--fg); border-color: var(--accent); }
+
+/* Колонки: основной поток + правый рельс «at a glance» (шире, чтобы влезали длинные URL) */
+.cols { display: flex; gap: 40px; align-items: flex-start; padding: 28px 0 0; flex-wrap: wrap; }
+.cols .main { flex: 1 1 480px; min-width: 0; }
+.cols .side { flex: 0 0 320px; min-width: 0; }
+.side a, .side li { overflow-wrap: anywhere; }
+.side section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+                padding: 16px 18px; position: sticky; top: 68px; }
+.side h2 { border: none; padding: 0; margin: 0 0 8px; }
+.side .group { margin-bottom: 16px; }
+.side .group:last-child { margin-bottom: 0; }
+.side ul { padding-left: 16px; }
+.side .ts { margin-bottom: 10px; }
+.side .ts:last-child { margin-bottom: 0; }
+
+section { margin: 0 0 28px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted);
+     margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+h3 { font-size: 15px; margin: 16px 0 4px; }
+.lead { font-size: 16px; margin: 0; }
+ul { margin: 6px 0; padding-left: 18px; }
+li { margin: 3px 0; overflow-wrap: anywhere; }
+code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--panel); padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+
+.side h3 { font-size: 13px; margin: 0 0 4px; }
+.vibe { color: var(--vibe); font-weight: 600; }
+
+/* Архитектура */
+.diagram { margin: 14px 0; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.diagram img, .diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+.diagram .caption { color: var(--muted); font-size: 12.5px; margin-top: 6px; text-align: center; }
+
+/* Changelog */
+.release { border-left: 2px solid var(--line); padding-left: 14px; margin: 0 0 14px; }
+.release.latest { border-left-color: var(--accent); }
+.release .ver { font-weight: 700; }
+.release.latest .ver::after { content: " · последний"; color: var(--accent); font-weight: 400; font-size: 12.5px; }
+
+footer { border-top: 1px solid var(--line); margin-top: 24px; padding: 16px 0 48px; color: var(--muted); font-size: 12.5px; }

@@ -1,0 +1,108 @@
+name: Overview — build & publish on release
+
+# На теге v* (или вручную): агент собирает контент overview-сайта, CI публикует его
+# на orphan-ветку `overview` и на GitHub Pages. Юзеру достаточно запушить тег.
+# LLM работает только на шаге агента; рендер и публикация — детерминированы.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # пуш на ветку overview (НЕ main)
+  pages: write      # публикация Pages
+  id-token: write   # OIDC для claude-code-action и deploy-pages
+
+concurrency:
+  group: overview
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # код на теге + вся история (для changelog) + теги
+
+      - id: rel
+        name: Determine release name
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=$(git describe --tags --abbrev=0 2>/dev/null || echo manual)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore prior overview baseline
+        run: bash .github/scripts/overview_restore.sh
+
+      - name: Generate overview content (agent)
+        if: env.CLAUDE_CODE_OAUTH_TOKEN != ''
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464  # v1.0.159
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: >
+            Use the overview-build skill to generate the project's overview content for release
+            ${{ steps.rel.outputs.name }}. Follow .overview/overview.rules.md. Edit files under
+            .overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
+            Do NOT commit or push — CI handles publishing.
+
+      - id: gate
+        name: Check generated content exists
+        run: |
+          if [ -f .overview/onepager.md ]; then
+            echo "ready=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::нет .overview/onepager.md (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
+          fi
+
+      - name: Install build deps
+        if: steps.gate.outputs.ready == '1'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends plantuml
+          pip install --quiet markdown jinja2 pyyaml
+
+      - name: Render site
+        if: steps.gate.outputs.ready == '1'
+        run: |
+          python3 .github/scripts/overview_render.py \
+            --src .overview --out .overview/site \
+            --release "${{ steps.rel.outputs.name }}" --generated "${{ steps.rel.outputs.date }}"
+
+      - name: Publish artifacts to overview branch
+        if: steps.gate.outputs.ready == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/overview_publish.sh "${{ steps.rel.outputs.name }}"
+
+      - name: Configure Pages
+        if: steps.gate.outputs.ready == '1'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: steps.gate.outputs.ready == '1'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .overview/site
+
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.ready == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
