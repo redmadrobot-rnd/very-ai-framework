@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Детерминированный рендер overview из .overview/ -> site/.
+"""Детерминированный рендер overview из .github/overview/ -> site/.
 
 LLM здесь НЕ участвует: контент (onepager/hld/changelog/*.puml) уже подготовлен агентом.
 Собираются ДВЕ строгие тёмные страницы-onepager'а по аудитории:
@@ -7,7 +7,7 @@ LLM здесь НЕ участвует: контент (onepager/hld/changelog/*
   index.html — Overview (менее техническая): суть, возможности, факты, refs, owner.
   tech.html  — Tech (техническая): архитектура+диаграммы, интерфейсы, запуск, стек, changelog.
 
-Вход   : .overview/{onepager.md, hld.md, changelog.md, architecture/*.puml, template/}
+Вход   : .github/overview/{onepager.md, hld.md, changelog.md, architecture/*.puml, template/}
 Выход  : <out>/{index.html, tech.html, style.css, *.svg}
 Зависимости: jinja2, markdown, pyyaml + PlantUML (команда `plantuml` или $PLANTUML_CMD).
 """
@@ -175,8 +175,8 @@ def page_tech(meta: dict, hld_md: str, diagrams: list[tuple[str, str]], changelo
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default=".overview")
-    ap.add_argument("--out", default=".overview/site")
+    ap.add_argument("--src", default=".github/overview")
+    ap.add_argument("--out", default=".github/overview/site")
     ap.add_argument("--release", default="dev")
     ap.add_argument("--generated", default="")
     args = ap.parse_args()

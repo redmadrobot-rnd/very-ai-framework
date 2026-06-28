@@ -9,7 +9,7 @@
 set -euo pipefail
 
 TAG="${1:-manual}"
-SRC="$(pwd)/.overview"
+SRC="$(pwd)/.github/overview"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY required}"
 TOKEN="${GITHUB_TOKEN:?GITHUB_TOKEN required}"
 HOST="${GITHUB_SERVER_URL:-https://github.com}"; HOST="${HOST#https://}"
@@ -28,14 +28,14 @@ else
   git rm -rf --quiet . 2>/dev/null || true
 fi
 
-rm -rf .overview
-mkdir -p .overview/architecture
+rm -rf .github/overview
+mkdir -p .github/overview/architecture
 for f in onepager.md hld.md changelog.md; do
-  [ -f "$SRC/$f" ] && cp "$SRC/$f" .overview/
+  [ -f "$SRC/$f" ] && cp "$SRC/$f" .github/overview/
 done
-[ -d "$SRC/architecture" ] && cp "$SRC"/architecture/*.puml .overview/architecture/ 2>/dev/null || true
+[ -d "$SRC/architecture" ] && cp "$SRC"/architecture/*.puml .github/overview/architecture/ 2>/dev/null || true
 
-git add -A .overview
+git add -A .github/overview
 if git diff --cached --quiet; then
   echo "overview: нет изменений, коммит не нужен"
 else

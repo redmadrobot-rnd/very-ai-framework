@@ -48,19 +48,19 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: >
-            Read .overview/overview-build.md and follow it to generate the project's overview
-            content for release ${{ steps.rel.outputs.name }}. Honor .overview/overview.rules.md.
-            Edit files under .overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
+            Read .github/overview/overview-build.md and follow it to generate the project's overview
+            content for release ${{ steps.rel.outputs.name }}. Honor .github/overview/overview.rules.md.
+            Edit files under .github/overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
             Do NOT commit or push — CI handles publishing.
 
       - id: gate
         name: Check generated content exists
         run: |
-          if [ -f .overview/onepager.md ]; then
+          if [ -f .github/overview/onepager.md ]; then
             echo "ready=1" >> "$GITHUB_OUTPUT"
           else
             echo "ready=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::нет .overview/onepager.md (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
+            echo "::warning::нет .github/overview/onepager.md (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
           fi
 
       - name: Install build deps
@@ -73,7 +73,7 @@ jobs:
         if: steps.gate.outputs.ready == '1'
         run: |
           python3 .github/scripts/overview_render.py \
-            --src .overview --out .overview/site \
+            --src .github/overview --out .github/overview/site \
             --release "${{ steps.rel.outputs.name }}" --generated "${{ steps.rel.outputs.date }}"
 
       - name: Publish artifacts to overview branch
@@ -90,7 +90,7 @@ jobs:
         if: steps.gate.outputs.ready == '1'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .overview/site
+          path: .github/overview/site
 
     outputs:
       ready: ${{ steps.gate.outputs.ready }}

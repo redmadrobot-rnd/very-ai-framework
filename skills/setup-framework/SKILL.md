@@ -140,28 +140,18 @@ mkdir -p .github/workflows .github/scripts
 cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual,overview}.yml .github/workflows/
 cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
 cp /tmp/aifw-template/.github/scripts/overview_{render.py,publish.sh,restore.sh} .github/scripts/
+cp -r /tmp/aifw-template/.github/overview .github/    # overview-сайт: ТЗ + шаблон + рецепт агенту
 cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
+grep -qxF '.github/overview/site/' .gitignore || echo '.github/overview/site/' >> .gitignore
 ```
 
 Don't copy the template's `README.md` / `CICD.md` blindly — the target project has its own.
 
-**Overview-on-release site.** `overview.yml` builds a GitHub Pages site on each `v*` tag: a CI
-agent — following `.overview/overview-build.md` (a plain instruction file, **deliberately not a
-skill**, so it never clutters everyday dev sessions) — writes the onboarding onepager + HLD +
-changelog from the KB and git history; CI renders them to static HTML and publishes. Scaffold
-the **inputs + recipe** (the generated outputs live on an orphan `overview` branch, not here):
-
-```bash
-mkdir -p .overview/template .overview/architecture
-cp /tmp/aifw-template/.overview/{overview.rules.md,overview-build.md} .overview/
-cp /tmp/aifw-template/.overview/template/* .overview/template/
-grep -qxF '.overview/site/' .gitignore || echo '.overview/site/' >> .gitignore
-```
-
-Then fill in `.overview/overview.rules.md` with the project's links/accents (it's the developer's
-spec for the site). The `overview` branch and `overview/<tag>` snapshot tags are created by CI on
-first release — nothing to set up by hand. Needs `CLAUDE_CODE_OAUTH_TOKEN` (same as `@claude`); if
-absent, the workflow no-ops with a notice.
+**Overview-on-release** (`overview.yml`) — just one more workflow: on a `v*` tag a CI agent builds
+the project's overview site (per `.github/overview/overview-build.md`) and publishes it to Pages;
+the `overview` branch is created by CI on first release. Files are copied above — afterwards just
+fill in `.github/overview/overview.rules.md` for the project and enable Pages (Step 6). Needs
+`CLAUDE_CODE_OAUTH_TOKEN` (same as `@claude`); absent → the workflow no-ops with a notice.
 
 Bring the project to the contract:
 - Each service is a `services/<name>/` directory with a `Dockerfile`.

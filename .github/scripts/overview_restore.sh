@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Подтягивает в воркспейс прошлые overview-артефакты с ветки `overview` (если она есть),
-# чтобы агент имел baseline: предыдущий onepager и .puml для проверки дрейфа архитектуры.
-# Первый релиз (ветки ещё нет) — тихо пропускается, агент стартует с чистого листа.
+# Подтягивает в воркспейс ВСЕ прошлые выходы агента с ветки `overview` (если она есть):
+# onepager.md, hld.md, changelog.md и architecture/*.puml. Агент правит их инкрементально
+# (дописывает changelog, обновляет onepager, сверяет .puml на дрейф), а не пересобирает с нуля.
+# Входы человека (overview.rules.md, template/) приходят с тега и здесь не перетираются —
+# на ветке `overview` их нет. Первый релиз (ветки ещё нет) — пропуск, агент стартует с чистого листа.
 set -euo pipefail
 
 if ! git ls-remote --exit-code --heads origin overview >/dev/null 2>&1; then
@@ -10,7 +12,7 @@ if ! git ls-remote --exit-code --heads origin overview >/dev/null 2>&1; then
 fi
 
 git fetch --quiet --depth 1 origin overview
-mkdir -p .overview/architecture
-git --work-tree=. checkout origin/overview -- .overview 2>/dev/null || true
+mkdir -p .github/overview/architecture
+git --work-tree=. checkout origin/overview -- .github/overview 2>/dev/null || true
 echo "overview: baseline восстановлен с ветки overview"
-ls -R .overview 2>/dev/null || true
+ls -R .github/overview 2>/dev/null || true
