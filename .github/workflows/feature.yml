@@ -5,9 +5,14 @@ on:
     branches: ["feature/**"]
   workflow_dispatch:
 
+concurrency:
+  group: feature-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   static:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +27,7 @@ jobs:
 
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,6 +47,7 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: "!contains(github.event.head_commit.message, '[skip security]')"
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +62,7 @@ jobs:
           extra_args: --only-verified
 
       - name: SAST
-        uses: semgrep/semgrep-action@v1
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1
         with:
           config: p/owasp-top-10
 

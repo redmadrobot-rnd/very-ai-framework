@@ -29,7 +29,12 @@ case "$mode" in
         base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
       fi
     fi
-    changed=$(git diff --name-only "$base" "$head" -- services/ | awk -F/ 'NF>1 {print $2}' | sort -u)
+    files=$(git diff --name-only "$base" "$head")
+    if printf '%s\n' "$files" | grep -qE '^(docker-compose\.yml|\.github/scripts/deploy\.sh)$'; then
+      all_services | jq -R . | jq -sc .
+      exit 0
+    fi
+    changed=$(printf '%s\n' "$files" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
     comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | jq -R . | jq -sc .
     ;;
   *)

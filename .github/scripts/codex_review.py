@@ -89,7 +89,10 @@ def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
 
 
 def run(*args: str, **kwargs) -> str:
-    return subprocess.run(args, capture_output=True, text=True, **kwargs).stdout
+    proc = subprocess.run(args, capture_output=True, text=True, **kwargs)
+    if proc.returncode != 0:
+        raise RuntimeError(f"{args[0]} exited {proc.returncode}: {proc.stderr.strip()[:1000]}")
+    return proc.stdout
 
 
 def commentable_lines(diff: str) -> dict[str, set[int]]:
