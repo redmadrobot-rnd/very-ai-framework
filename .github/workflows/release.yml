@@ -13,7 +13,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Прод-деплой только с тега, указывающего на проверенный main.
       - name: Tag must point at main
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
