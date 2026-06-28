@@ -1,14 +1,9 @@
----
-name: overview-build
-description: >
-  Generate the project's release "overview" content — two strict dark onepagers (Overview for a
-  less-technical audience, Tech for engineers with HLD/PlantUML architecture and changelog) — from
-  the knowledge base, the code at the release tag, git history, and the developer's
-  overview.rules.md. Edit files under .overview/; CI publishes them to the orphan `overview` branch
-  and to GitHub Pages. Run on release.
----
+# overview-build — инструкция агенту: собрать контент overview-сайта на релизе
 
-# overview-build — собрать контент overview-сайта на релизе
+> Это **не скилл**, а файл-инструкция: его читает агент в CI (через `prompt` в
+> `claude-code-action`, см. `.github/workflows/overview.yml`). Он намеренно НЕ лежит в
+> `.claude/skills/`, чтобы не подмешиваться в контекст обычных dev-сессий — это чисто
+> релизная, техническая история.
 
 Ты готовишь **контент** overview-сайта. Внешний вид и сборка — не твоя забота: строгий тёмный
 шаблон (`.overview/template/`) и детерминированный рендер (`overview_render.py`) собирают HTML сами.
@@ -29,7 +24,7 @@ description: >
 
 1. **Прочитай ТЗ.** `.overview/overview.rules.md` — что обязательно показать, что скрыть, ссылки,
    акценты. Это директивы. Ничего из «скрыть» на сайт не выноси (Pages публичен по URL).
-2. **Собери факты.** База знаний (`/kb-search`, `docs/gitmark/`), README, конфиги, `services/`.
+2. **Собери факты.** База знаний (`docs/gitmark/`, поиск по KB), README, конфиги, `services/`.
    Определи: назначение, статус, стек, компоненты, внешние интерфейсы, как запускается.
 3. **Диапазон релиза.** Тег — в промпте (напр. `v1.3.0`). Предыдущий: `git tag --sort=-v:refname`.
    Изменения: `git log <prev>..<tag>` + связанные PR.
@@ -59,7 +54,7 @@ summary: >                            # [O] 2–3 предложения: что
   Система для транскрипции ...
 capabilities:                         # [O] ключевые возможности
   - Реализована на базе пайпов WhisperX
-metrics:                              # [O] масштаб/производительность
+metrics:                              # [O] масштаб/производительность (основной поток)
   - 10x юзеров, файлы до 2гб
 interfaces:                           # [T] API/интеграции/внешние интерфейсы
   - REST API (FastAPI) — загрузка, экспорт, шеринг
@@ -70,11 +65,11 @@ techstack:                            # [T] стек по группам (пра
     note: VibeCoded!                  # опц. пометка справа от группы
     items: [Vue 3, Vite]
   Backend: [Python 3.12, FastAPI, WhisperX]
-environments:                         # [O+T] окружения
+environments:                         # [O+T] окружения (правый рельс)
   - {name: prod, url: https://...}
-refs:                                 # [O+T] ссылки
+refs:                                 # [O+T] ссылки (правый рельс)
   - {label: Репо, url: https://...}
-owner: "@virrius (https://t.me/virrius)"   # [O] холдер/контакт
+owner: "@virrius (https://t.me/virrius)"   # [O] холдер/контакт (правый рельс)
 caveats:                              # [T] важные оговорки, форки, gotchas
   - Имеет форк LoqosMeet ...
 ---

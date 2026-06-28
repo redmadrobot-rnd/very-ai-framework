@@ -48,9 +48,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: >
-            Use the overview-build skill to generate the project's overview content for release
-            ${{ steps.rel.outputs.name }}. Follow .overview/overview.rules.md. Edit files under
-            .overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
+            Read .overview/overview-build.md and follow it to generate the project's overview
+            content for release ${{ steps.rel.outputs.name }}. Honor .overview/overview.rules.md.
+            Edit files under .overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
             Do NOT commit or push — CI handles publishing.
 
       - id: gate

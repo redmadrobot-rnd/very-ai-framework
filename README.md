@@ -43,8 +43,7 @@
 | `.claude/skills/kb-search/`, `.claude/skills/kb-maintain/` | KB | поиск и ведение базы знаний (GitMark) |
 | `.claude/commands/` | KB | команды `/kb-doc`, `/kb-build`, `/kb-graph` |
 | `docs/gitmark/` | KB | база знаний прикладного проекта (`ontology.md` — спека модели) |
-| `.overview/` | Overview | вход для overview-сайта: `overview.rules.md` (ТЗ) + `template/` (скелет). Выходы агента — на orphan-ветке `overview` |
-| `.claude/skills/overview-build/` | Overview | скилл: агент собирает контент сайта (onepager/HLD/changelog) на релизе |
+| `.overview/` | Overview | overview-сайт: `overview.rules.md` (ТЗ) + `template/` (скелет) + `overview-build.md` (инструкция CI-агенту, **не скилл**). Выходы агента — на orphan-ветке `overview` |
 | `CLAUDE.md` | Dev-flow | правила разработки для кодового агента |
 | `pyproject.toml` | CI/CD | конфиг ruff + pytest |
 

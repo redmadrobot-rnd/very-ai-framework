@@ -145,14 +145,15 @@ cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
 
 Don't copy the template's `README.md` / `CICD.md` blindly — the target project has its own.
 
-**Overview-on-release site.** `overview.yml` builds a GitHub Pages site on each `v*` tag: an
-agent (the `overview-build` skill, copied in Step 2) writes the onboarding onepager + HLD +
+**Overview-on-release site.** `overview.yml` builds a GitHub Pages site on each `v*` tag: a CI
+agent — following `.overview/overview-build.md` (a plain instruction file, **deliberately not a
+skill**, so it never clutters everyday dev sessions) — writes the onboarding onepager + HLD +
 changelog from the KB and git history; CI renders them to static HTML and publishes. Scaffold
-the **human inputs** (the generated outputs live on an orphan `overview` branch, not here):
+the **inputs + recipe** (the generated outputs live on an orphan `overview` branch, not here):
 
 ```bash
 mkdir -p .overview/template .overview/architecture
-cp /tmp/aifw-template/.overview/overview.rules.md .overview/
+cp /tmp/aifw-template/.overview/{overview.rules.md,overview-build.md} .overview/
 cp /tmp/aifw-template/.overview/template/* .overview/template/
 grep -qxF '.overview/site/' .gitignore || echo '.overview/site/' >> .gitignore
 ```
