@@ -70,9 +70,9 @@ jobs:
             echo "::warning::нет site/index.html (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
           fi
 
-      - name: Add stylesheet to site
+      - name: Add stylesheet + pan/zoom scripts to site
         if: steps.gate.outputs.ready == '1'
-        run: cp .github/overview/template/style.css .github/overview/site/style.css
+        run: cp .github/overview/template/{style.css,overview.js,svg-pan-zoom.min.js} .github/overview/site/
 
       - name: Publish site to overview branch
         if: steps.gate.outputs.ready == '1'

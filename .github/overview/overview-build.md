@@ -51,10 +51,12 @@
 ## HTML-сниппеты (используй классы style.css)
 
 **Диаграмма (inline SVG, Tech):** вставь содержимое сгенерированного `.svg` (элемент `<svg>…</svg>`,
-без XML-пролога) внутрь `.diagram`:
+без XML-пролога) внутрь `.diagram`. Pan/zoom включается сам (скрипты `svg-pan-zoom.min.js` +
+`overview.js` уже в подвале скелета — не удаляй их): кнопки +/−/reset, колесо — зум, тащить — двигать,
+тач/пинч; клики по узлам (`$link`) работают. Ничего дополнительно подключать не надо.
 ```html
 <div class="diagram">
-  <svg ...>…вставленный PlantUML-SVG c кликабельными [[links]]…</svg>
+  <svg ...>…вставленный PlantUML-SVG c кликабельными $link-узлами…</svg>
   <div class="caption">System Context</div>
 </div>
 ```

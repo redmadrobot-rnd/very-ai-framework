@@ -80,6 +80,12 @@ pre { background: var(--panel); padding: 12px; overflow-x: auto; border: 1px sol
 .diagram { margin: 14px 0; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .diagram img, .diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
 .diagram .caption { color: var(--muted); font-size: 12.5px; margin-top: 6px; text-align: center; }
+/* интерактивная (pan/zoom через svg-pan-zoom + overview.js): фикс-вьюпорт */
+.diagram.pannable { height: 70vh; max-height: 640px; overflow: hidden;
+                    position: relative; padding: 0; }
+.diagram.pannable svg { width: 100%; height: 100%; max-width: none; display: block; }
+.diagram.pannable .caption { position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+                    background: rgba(255,255,255,0.85); margin: 0; padding: 4px; }
 
 /* Changelog */
 .release { border-left: 2px solid var(--line); padding-left: 14px; margin: 0 0 14px; }
