@@ -1,3 +1,7 @@
+# ОБРАЗЕЦ. Скопируй в docker-compose.yml и опиши свои сервисы.
+# Контракт деплоя: образ = ${IMAGE_PREFIX}/<сервис>:${TAG} (IMAGE_PREFIX задаёт deploy.sh,
+# в нижнем регистре); env_file = .env. healthcheck желателен — deploy.sh делает `up -d --wait`,
+# без healthcheck деплой ждёт только running, а не healthy.
 services:
   api:
     image: ${IMAGE_PREFIX}/api:${TAG:-latest}
