@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  СКЕЛЕТ + ПРИМЕР страницы overview-сайта. Это дефолтная организация, которую агент копирует
+  и заполняет под проект (см. .github/overview/overview-build.md). Стиль задаёт style.css —
+  его НЕ трогаем и НЕ дублируем инлайном, только пользуемся классами отсюда.
+
+  Страниц три (index.html / tech.html / changelog.html). Шапка (header.bar) и подвал (footer)
+  одинаковые на всех — копируй как есть, меняй только active в nav и заголовок <title>.
+  Ниже показана Overview; нужные секции Tech/Changelog — в overview-build.md.
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ИМЯ ПРОЕКТА — overview</title>   <!-- на tech.html: "… — tech", на changelog.html: "… — changelog" -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="wrap">
+      <span class="name">ИМЯ ПРОЕКТА</span>
+      <nav>
+        <a href="index.html" class="active">Overview</a>   <!-- class="active" — только на текущей странице -->
+        <a href="tech.html">Tech</a>
+        <a href="changelog.html">Changelog</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap">
+
+      <!-- HERO — на всех трёх страницах (на Tech/Changelog в .tagline можно дать подзаголовок) -->
+      <section class="hero">
+        <h1>ИМЯ ПРОЕКТА</h1>
+        <p class="tagline">Одна строка — что это и для кого</p>
+        <div class="badges">
+          <span class="badge status">MVP / demo / prod</span>
+          <span class="badge">v1.0.0</span>
+          <span class="badge">updated 01.01.26</span>
+        </div>
+      </section>
+
+      <!-- ДВЕ КОЛОНКИ: основной поток .main + правый рельс .side (рельс опционален: без него останется один .main) -->
+      <div class="cols">
+        <div class="main">
+          <section><p class="lead">2–3 предложения: что за система и какую задачу решает.</p></section>
+
+          <section>
+            <h2>Возможности</h2>
+            <ul>
+              <li>Ключевая возможность 1</li>
+              <li>Ключевая возможность 2</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Метрики</h2>
+            <ul>
+              <li>Нагрузка / лимиты / время отклика</li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="side"><section>
+          <div class="group">
+            <h2>Окружения</h2>
+            <ul><li>prod: <a href="https://...">https://...</a></li></ul>
+          </div>
+          <div class="group">
+            <h2>Refs</h2>
+            <ul><li>Репо: <a href="https://...">https://...</a></li></ul>
+          </div>
+          <div class="group">
+            <h2>Owner</h2>
+            <div>холдер / контакт</div>
+          </div>
+        </div></div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">Сгенерировано агентом на релизе <code>v1.0.0</code> · 01.01.26</div>
+  </footer>
+</body>
+</html>

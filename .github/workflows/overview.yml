@@ -1,8 +1,8 @@
 name: Overview — build & publish on release
 
-# На теге v* (или вручную): агент собирает контент overview-сайта, CI публикует его
-# на orphan-ветку `overview` и на GitHub Pages. Юзеру достаточно запушить тег.
-# LLM работает только на шаге агента; рендер и публикация — детерминированы.
+# На теге v* (или вручную): агент пишет HTML-страницы overview-сайта (и inline-SVG диаграммы
+# через plantuml), CI публикует их на orphan-ветку `overview` и на GitHub Pages.
+# Юзеру достаточно запушить тег. Публикация детерминирована; LLM работает только на шаге агента.
 
 on:
   push:
@@ -42,41 +42,39 @@ jobs:
       - name: Restore prior overview baseline
         run: bash .github/scripts/overview_restore.sh
 
-      - name: Generate overview content (agent)
+      - name: Install PlantUML (agent renders diagrams with it)
+        if: env.CLAUDE_CODE_OAUTH_TOKEN != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends plantuml
+
+      - name: Build site (agent writes HTML directly)
         if: env.CLAUDE_CODE_OAUTH_TOKEN != ''
         uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464  # v1.0.159
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: >
-            Read .github/overview/overview-build.md and follow it to generate the project's overview
-            content for release ${{ steps.rel.outputs.name }}. Honor .github/overview/overview.rules.md.
-            Edit files under .github/overview/ only (onepager.md, hld.md, changelog.md, architecture/*.puml).
-            Do NOT commit or push — CI handles publishing.
+            Read .github/overview/overview-build.md and follow it to build the project's overview
+            SITE for release ${{ steps.rel.outputs.name }} (date ${{ steps.rel.outputs.date }}).
+            Honor .github/overview/overview.rules.md. Write the three pages into
+            .github/overview/site/ (index.html, tech.html, changelog.html) using .github/overview/template
+            (style.css + skeleton.html), update .github/overview/architecture/*.puml, render diagram
+            SVGs with `plantuml -tsvg` and embed them inline. Edit files only under
+            .github/overview/site and .github/overview/architecture. Do NOT commit or push.
 
       - id: gate
-        name: Check generated content exists
+        name: Check site was produced
         run: |
-          if [ -f .github/overview/onepager.md ]; then
+          if [ -f .github/overview/site/index.html ]; then
             echo "ready=1" >> "$GITHUB_OUTPUT"
           else
             echo "ready=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::нет .github/overview/onepager.md (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
+            echo "::warning::нет site/index.html (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
           fi
 
-      - name: Install build deps
+      - name: Add stylesheet to site
         if: steps.gate.outputs.ready == '1'
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends plantuml
-          pip install --quiet markdown jinja2 pyyaml
+        run: cp .github/overview/template/style.css .github/overview/site/style.css
 
-      - name: Render site
-        if: steps.gate.outputs.ready == '1'
-        run: |
-          python3 .github/scripts/overview_render.py \
-            --src .github/overview --out .github/overview/site \
-            --release "${{ steps.rel.outputs.name }}" --generated "${{ steps.rel.outputs.date }}"
-
-      - name: Publish artifacts to overview branch
+      - name: Publish site to overview branch
         if: steps.gate.outputs.ready == '1'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

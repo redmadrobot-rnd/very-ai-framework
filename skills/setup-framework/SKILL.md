@@ -139,7 +139,7 @@ Add or update a single doc later with **`/kb-doc <topic>`**.
 mkdir -p .github/workflows .github/scripts
 cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual,overview}.yml .github/workflows/
 cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
-cp /tmp/aifw-template/.github/scripts/overview_{render.py,publish.sh,restore.sh} .github/scripts/
+cp /tmp/aifw-template/.github/scripts/overview_{publish.sh,restore.sh} .github/scripts/
 cp -r /tmp/aifw-template/.github/overview .github/    # overview-сайт: ТЗ + шаблон + рецепт агенту
 cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
 grep -qxF '.github/overview/site/' .gitignore || echo '.github/overview/site/' >> .gitignore

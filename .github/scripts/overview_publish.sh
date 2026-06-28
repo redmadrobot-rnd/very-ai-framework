@@ -3,9 +3,9 @@
 # Запускается в CI ПОСЛЕ работы агента. Работает в отдельном клоне, не трогая build-воркспейс
 # и НЕ касаясь main (правило фреймворка: в main напрямую не коммитим).
 #
-# На ветке `overview` лежат ТОЛЬКО выходы агента: onepager.md, hld.md, changelog.md,
-# architecture/*.puml. Входы человека (overview.rules.md, template/) остаются на main.
-# Каждый релиз = один коммит + тег `overview/<tag>` для извлечения снапшота.
+# На ветке `overview` лежат ТОЛЬКО выходы агента: site/{index,tech,changelog}.html и
+# architecture/*.puml (source-of-truth для дрейфа). Входы человека (overview.rules.md, template/)
+# остаются на main. Каждый релиз = один коммит + тег `overview/<tag>` для извлечения снапшота.
 set -euo pipefail
 
 TAG="${1:-manual}"
@@ -29,9 +29,9 @@ else
 fi
 
 rm -rf .github/overview
-mkdir -p .github/overview/architecture
-for f in onepager.md hld.md changelog.md; do
-  [ -f "$SRC/$f" ] && cp "$SRC/$f" .github/overview/
+mkdir -p .github/overview/site .github/overview/architecture
+for f in index.html tech.html changelog.html; do
+  [ -f "$SRC/site/$f" ] && cp "$SRC/site/$f" .github/overview/site/
 done
 [ -d "$SRC/architecture" ] && cp "$SRC"/architecture/*.puml .github/overview/architecture/ 2>/dev/null || true
 
