@@ -103,10 +103,27 @@ self-hosted runner'е, авторизованном **подпиской ChatGPT
 Если подписка не нужна — можно переписать ревью на `openai/codex-action` +
 `OPENAI_API_KEY` (биллинг по API).
 
-## Развернуть такой же CICD в другом проекте
+## Claude runner (`@claude`) — авторизация и настройка
 
-Процедура — в скилле [`skills/setup-framework/SKILL.md`](skills/setup-framework/SKILL.md):
-агент изучает целевой репо, переносит файлы из шаблона по URL, настраивает GitHub и
-сервер. SKILL.md самодостаточен — его можно просто дать агенту как инструкцию.
+Правки по запросу (`@claude …`, в т.ч. `@claude fix …`) выполняет
+**`anthropics/claude-code-action`** в `claude.yml`. В отличие от Codex он крутится на
+**GitHub-hosted `ubuntu-latest`**.
 
-Как сделать скилл вызываемым (`/setup-framework`) — см. [README.md](README.md#установка-скиллов).
+В PR Claude коммитит правки **прямо в head-ветку этого PR**; в обычном issue (ветки нет) —
+заводит новую ветку и открывает PR.
+
+Аутентификация
+
+1. **GitHub App «claude» установить на репозиторий** — <https://github.com/apps/claude>
+   → Install → выбрать аккаунт/организацию → отметить нужный репо. Через installation-token
+   этого App экшен делает все GitHub-операции (читать тред, постить комменты, **пушить
+   коммит в ветку PR**); он же держит право `Contents: write`. Настройки потом —
+   <https://github.com/settings/installations> → Claude → Configure.
+2. **OAuth-токен подписки в секретах репо.** Сгенерировать в своём терминале
+   `claude setup-token` (вход в браузере → строка `sk-ant-oat01-…`, печатается только в TTY)
+   и положить как **Repository secret** `CLAUDE_CODE_OAUTH_TOKEN` (Settings → Secrets and
+   variables → Actions → Secrets).
+
+> Без секрета (п.2) job завершается **зелёным, но молча**: шаг Claude скипается по
+> `if: env.CLAUDE_CODE_OAUTH_TOKEN != ''`.
+
