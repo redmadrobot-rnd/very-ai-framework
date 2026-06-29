@@ -63,11 +63,14 @@ jobs:
       - id: gate
         name: Check site was produced
         run: |
-          if [ -f .github/overview/site/index.html ]; then
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "ready=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN не задан — агент не запускался, публикация пропущена (no-op)"
+          elif [ -f .github/overview/site/index.html ]; then
             echo "ready=1" >> "$GITHUB_OUTPUT"
           else
             echo "ready=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::нет site/index.html (CLAUDE_CODE_OAUTH_TOKEN не задан и нет baseline) — пропуск публикации"
+            echo "::warning::нет site/index.html — агент не создал сайт, пропуск публикации"
           fi
 
       - name: Add stylesheet + script to site
