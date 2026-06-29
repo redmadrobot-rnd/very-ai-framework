@@ -87,7 +87,7 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
-          target: "/srv/deploy/${{ inputs.environment }}"
+          target: "/srv/deploy/${{ github.event.repository.name }}/${{ inputs.environment }}"
       - name: Deploy via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         # Все подстановки идут через env и пробрасываются в удалённый шелл (envs:),
@@ -97,13 +97,14 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_ENV: ${{ inputs.environment }}
           DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ needs.build.outputs.tag }}
           DEPLOY_SERVICE: ${{ inputs.service }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_TAG,DEPLOY_SERVICE
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICE
           script: >
-            bash "/srv/deploy/$DEPLOY_ENV/.github/scripts/deploy.sh"
+            bash "/srv/deploy/$DEPLOY_PROJECT/$DEPLOY_ENV/.github/scripts/deploy.sh"
             "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICE"
