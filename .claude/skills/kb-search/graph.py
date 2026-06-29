@@ -21,8 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from gm import force_utf8_io
 from gm.core import KB_DIR, LINK_RE, area_of, iter_md, nfc, repo_root, title_of
 from gm.lint import parse_frontmatter, strip_code
+
+# Windows console (cp1251) crashes on ✓/Cyrillic output — force UTF-8.
+force_utf8_io()
 
 # Типы связей онтологии (ключи под `links:`); inline-ссылки → relates_to.
 LINK_TYPES = ("documents", "depends_on", "supersedes", "relates_to",

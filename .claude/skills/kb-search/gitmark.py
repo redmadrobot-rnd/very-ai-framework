@@ -17,17 +17,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-# Windows-консоль (cp1251) роняет вывод с ✓/кириллицей — форсируем UTF-8.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
 # Гарантируем импорт пакета gm/ рядом с этим файлом (при запуске по абсолютному пути).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from gm import VERSION
+from gm import VERSION, force_utf8_io
+
+# Windows console (cp1251) crashes on ✓/Cyrillic output — force UTF-8.
+force_utf8_io()
 from gm.core import repo_root
 from gm.index import cmd_index, cmd_stat
 from gm.lint import INVARIANTS, cmd_lint
