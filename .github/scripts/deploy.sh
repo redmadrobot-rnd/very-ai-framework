@@ -38,6 +38,7 @@ DIR="/srv/deploy/${PROJECT}/${ENVIRONMENT}"
 # символами (docker: ^[a-z0-9][a-z0-9_-]*) — иначе стеки разных проектов схлопнутся
 CPN="${PROJECT,,}-${ENVIRONMENT}"
 CPN="${CPN//[^a-z0-9_-]/-}"
+while [[ "$CPN" == [-_]* ]]; do CPN="${CPN#?}"; done  # docker требует старт с [a-z0-9]
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
