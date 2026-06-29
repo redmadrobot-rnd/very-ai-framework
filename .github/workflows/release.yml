@@ -95,7 +95,7 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
-          target: "/srv/deploy/prod"
+          target: "/srv/deploy/${{ github.event.repository.name }}/prod"
 
       - name: Deploy all services to prod
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
@@ -107,4 +107,4 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
-          script: bash /srv/deploy/prod/.github/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}
+          script: bash /srv/deploy/${{ github.event.repository.name }}/prod/.github/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}

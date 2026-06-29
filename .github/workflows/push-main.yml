@@ -83,7 +83,7 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
-          target: "/srv/deploy/dev"
+          target: "/srv/deploy/${{ github.event.repository.name }}/dev"
 
       - name: Deploy changed services to dev
         uses: appleboy/ssh-action@v1
@@ -96,5 +96,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
           script: >
-            bash /srv/deploy/dev/.github/scripts/deploy.sh dev ${{ github.repository }} ${{ github.sha }}
+            bash /srv/deploy/${{ github.event.repository.name }}/dev/.github/scripts/deploy.sh dev ${{ github.repository }} ${{ github.sha }}
             "${{ join(fromJson(needs.changed.outputs.services), ' ') }}"
