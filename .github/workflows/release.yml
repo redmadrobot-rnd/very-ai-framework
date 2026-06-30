@@ -1,4 +1,10 @@
-name: Release — build all & deploy prod
+name: Release — stamp version & deploy prod
+
+# Триггер: тег v*. Релиз НЕ пересобирает то, что push-main уже собрал:
+# для каждого сервиса берётся готовый образ по sha его последнего изменения
+# (≤ тег) и ретегается на :<vX>+:stable (manifest-copy в реестре, без сборки).
+# Сборка — только fallback: образ не найден (multi-commit push / прочищен реестр).
+# Корректно и для тега на HEAD, и на старый коммit main (адресация по sha, не :latest).
 
 on:
   push:
@@ -19,19 +25,81 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main \
             || { echo "::error::tag ${GITHUB_REF_NAME} is not on main"; exit 1; }
 
+  # План релиза: делит сервисы на «ретег готового» и «fallback-сборка».
+  # Для каждого сервиса резолвит sha последнего коммита (≤ тег), менявшего его
+  # билд-вход (его папка или общие deploy-файлы) — push-main пометил образ этим sha.
   discover:
     needs: verify-tag
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
     outputs:
-      services: ${{ steps.s.outputs.services }}
+      build_list: ${{ steps.plan.outputs.build_list }}
+      retag_map:  ${{ steps.plan.outputs.retag_map }}
     steps:
       - uses: actions/checkout@v4
-      - id: s
-        run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
+        with:
+          fetch-depth: 0
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: plan
+        run: |
+          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          build='[]'; retag='[]'
+          for SVC in $(bash .github/scripts/services.sh list | jq -r '.[]'); do
+            SHA=$(git log -1 --format=%H "$GITHUB_SHA" -- \
+                    "services/$SVC/" docker-compose.yml \
+                    .github/scripts/deploy.sh .github/scripts/write-configs.sh)
+            if [ -n "$SHA" ] && docker buildx imagetools inspect "$PREFIX/$SVC:$SHA" >/dev/null 2>&1; then
+              retag=$(jq -c --arg s "$SVC" --arg sha "$SHA" '. + [{service:$s,sha:$sha}]' <<<"$retag")
+            else
+              build=$(jq -c --arg s "$SVC" '. + [$s]' <<<"$build")
+            fi
+          done
+          echo "build_list=$build" >> "$GITHUB_OUTPUT"
+          echo "retag_map=$retag"  >> "$GITHUB_OUTPUT"
+          echo "BUILD (fallback): $build"
+          echo "RETAG (готовые):  $retag"
 
+  # Ретег уже собранных образов: <svc>:<sha> -> :<vX> + :stable. Без сборки и buildx-бутстрапа.
+  retag:
+    needs: [verify-tag, discover]
+    if: ${{ needs.discover.outputs.retag_map != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Stamp version onto prebuilt images
+        env:
+          RETAG_MAP: ${{ needs.discover.outputs.retag_map }}
+          REF: ${{ github.ref_name }}
+        run: |
+          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          jq -c '.[]' <<<"$RETAG_MAP" | while read -r row; do
+            SVC=$(jq -r '.service' <<<"$row"); SHA=$(jq -r '.sha' <<<"$row")
+            echo "retag $SVC: :$SHA -> :$REF, :stable"
+            docker buildx imagetools create \
+              -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$PREFIX/$SVC:$SHA"
+          done
+
+  # Fallback-сборка: только сервисы без готового образа (в норме матрица пуста → джоба скипается).
   build:
     needs: [verify-tag, discover]
+    if: ${{ needs.discover.outputs.build_list != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -40,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJson(needs.discover.outputs.services) }}
+        service: ${{ fromJson(needs.discover.outputs.build_list) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,8 +137,13 @@ jobs:
             ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:stable
 
   deploy-prod:
-    needs: [discover, build]
-    if: ${{ needs.discover.outputs.services != '[]' }}
+    needs: [discover, retag, build]
+    # Запускаемся, если discover ок и ни retag, ни build не упали (skipped — допустимо).
+    if: >-
+      ${{ always()
+          && needs.discover.result == 'success'
+          && needs.retag.result != 'failure' && needs.retag.result != 'cancelled'
+          && needs.build.result  != 'failure' && needs.build.result  != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
