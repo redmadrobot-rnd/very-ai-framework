@@ -1,0 +1,19 @@
+name: Main CI
+
+# Полный прогон после мержа в main (и по кнопке): все окружения, все тесты включая
+# heavy. Ловит то, что узкий PR-гейт (affected + not heavy) пропускает.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: main-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/_checks.yml
+
+  tests:
+    uses: ./.github/workflows/_tests.yml

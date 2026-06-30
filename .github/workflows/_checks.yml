@@ -1,16 +1,11 @@
-name: Feature CI
+name: Checks (reusable)
 
+# lint + security. Общий блок для PR и main, чтобы не дублировать в двух файлах.
 on:
-  push:
-    branches: ["feature/**"]
-  workflow_dispatch:
-
-concurrency:
-  group: feature-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 jobs:
-  static:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,30 +20,10 @@ jobs:
           ruff check .
           ruff format --check .
 
-  tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install project + test deps (editable; pytest good practices)
-        run: |
-          pip install pytest
-          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
-      - name: Light tests (heavy excluded)
-        run: |
-          [ -d tests ] || { echo "::notice::нет каталога tests — пропуск"; exit 0; }
-          set +e; pytest -m "not heavy" -q; rc=$?
-          [ $rc -eq 5 ] && rc=0   # exit 5 = тесты не собраны → не падаем
-          exit $rc
-
   security:
+    if: "!contains(github.event.head_commit.message, '[skip security]')"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: "!contains(github.event.head_commit.message, '[skip security]')"
     steps:
       - uses: actions/checkout@v4
         with:

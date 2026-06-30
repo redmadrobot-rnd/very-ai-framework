@@ -1,0 +1,88 @@
+name: Tests (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      markers:
+        description: 'pytest -m expression; пусто = все тесты'
+        type: string
+        default: ''
+      affected:
+        description: 'true = только окружения, затронутые изменениями ветки'
+        type: boolean
+        default: false
+      python-version:
+        type: string
+        default: '3.12'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      envs: ${{ steps.find.outputs.envs }}   # окружения для матрицы (на feature — affected)
+      all: ${{ steps.find.outputs.all }}      # все обнаруженные (для корректного --ignore)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # affected требует полную историю для merge-base; иначе хватает HEAD
+          fetch-depth: ${{ inputs.affected && '0' || '1' }}
+      - id: find
+        shell: bash
+        env:
+          AFFECTED: ${{ inputs.affected }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          all=$(bash .github/scripts/discover-envs.sh)
+          envs="$all"
+          if [ "$AFFECTED" = "true" ] && [ "$all" != "[]" ]; then
+            base=$(bash .github/scripts/affected-base.sh "$DEFAULT_BRANCH")
+            envs=$(bash .github/scripts/affected-envs.sh "$all" "$base")
+          fi
+          echo "all=$all"   >> "$GITHUB_OUTPUT"
+          echo "envs=$envs" >> "$GITHUB_OUTPUT"
+          echo "::notice::test envs: $envs (discovered: $all)"
+
+  test:
+    needs: discover
+    if: needs.discover.outputs.envs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.discover.outputs.envs) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - run: pip install uv
+      - name: pytest (${{ matrix.env }})
+        working-directory: ${{ matrix.env }}
+        shell: bash
+        run: |
+          # корневое окружение не должно повторно собирать тесты сервисов,
+          # у которых есть собственное окружение. Берём ПОЛНЫЙ список обнаруженных
+          # (outputs.all), а не affected-подмножество — иначе при affected-прогоне
+          # корень мог бы случайно собрать тесты незатронутого сервиса.
+          ignores=""
+          if [ "${{ matrix.env }}" = "." ]; then
+            for e in $(printf '%s' '${{ needs.discover.outputs.all }}' | grep -o '"[^"]*"' | tr -d '"'); do
+              [ "$e" = "." ] && continue
+              ignores="$ignores --ignore=$e"
+            done
+          fi
+          # [project] → ставим проект + dev-группу + все extras (тест-зависимости:
+          # pytest-asyncio, httpx и т.п., в т.ч. старый extra [test]).
+          # tooling-only (pytest-конфиг без [project]) → эфемерный venv, только pytest.
+          if grep -q '^\[project\]' pyproject.toml 2>/dev/null; then
+            envflag="--all-extras"
+          else
+            envflag="--no-project"
+          fi
+          set +e
+          uv run $envflag --with pytest pytest $ignores ${{ inputs.markers }} -q
+          rc=$?
+          [ $rc -eq 5 ] && rc=0   # ничего не собрано → не падаем (тестов ещё нет)
+          exit $rc
