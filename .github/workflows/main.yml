@@ -1,4 +1,4 @@
-name: Main CI
+name: Full tests (main)
 
 # Полный прогон после мержа в main (и по кнопке): все окружения, все тесты включая
 # heavy. Ловит то, что узкий PR-гейт (affected + not heavy) пропускает.
