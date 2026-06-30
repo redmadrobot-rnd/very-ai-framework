@@ -24,6 +24,9 @@ CI находит тесты сам — по `pyproject.toml`. Работает 
 На push в feature-ветку CI не запускается — до PR качество держит локальный pre-commit
 (ruff + тесты + секреты). Так нет двойного прогона `push` + `pull_request`.
 
+**Ручной запуск:** Actions → `Main CI` → Run workflow (на любой ветке). По умолчанию гонит
+всё; в поле `markers` можно задать `heavy` (только тяжёлые) или `not heavy`.
+
 ## Пример `pyproject.toml`
 
 ```toml

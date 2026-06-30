@@ -1,11 +1,16 @@
 name: Main CI
 
-# Полный прогон после мержа в main (и по кнопке): все окружения, все тесты включая
-# heavy. Ловит то, что узкий PR-гейт (affected + not heavy) пропускает.
+# Полный прогон после мержа в main + ручной запуск по кнопке (на любой выбранной
+# ветке). Ловит то, что узкий PR-гейт (affected + not heavy) пропускает.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      markers:
+        description: 'pytest -m (пусто = все; "heavy" — только тяжёлые; "not heavy" — без них)'
+        type: string
+        default: ''
 
 concurrency:
   group: main-ci-${{ github.ref }}
@@ -17,3 +22,6 @@ jobs:
 
   tests:
     uses: ./.github/workflows/_tests.yml
+    with:
+      # push в main → все тесты; ручной запуск → что задал в markers
+      markers: ${{ inputs.markers || '' }}
