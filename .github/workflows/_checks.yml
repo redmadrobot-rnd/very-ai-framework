@@ -1,0 +1,51 @@
+name: Checks (reusable)
+
+# lint + security. Общий блок для PR и main, чтобы не дублировать в двух файлах.
+on:
+  workflow_call:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff==0.14.0
+      - name: Lint + format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+  security:
+    if: "!contains(github.event.head_commit.message, '[skip security]')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan
+        # Пин на неизменяемый commit-SHA (не плавающий @main): сторонний action в CI
+        # не должен менять поведение без коммита у нас. Обновлять осознанно.
+        uses: trufflesecurity/trufflehog@30d5bb91af1a771378349dbbb0c82129392acf70  # v3.95.6
+        with:
+          extra_args: --only-verified
+
+      - name: SAST
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1
+        with:
+          config: p/owasp-top-10
+
+      - name: Deps audit
+        run: |
+          pip install pip-audit
+          if grep -q '^\[project\]' pyproject.toml; then
+            pip-audit .                      # читает зависимости из pyproject [project]
+          else
+            echo "::notice::в pyproject нет [project].dependencies — аудит пропущен"
+          fi
