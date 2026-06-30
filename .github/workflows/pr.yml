@@ -21,12 +21,13 @@ jobs:
       affected: true
 
   codex-review:
-    # ОПЦИЯ (выключена). Авто-ревью Codex при ОТКРЫТИИ PR. Включить — убрать `false &&`.
+    # ОПЦИЯ. Авто-ревью Codex при ОТКРЫТИИ PR. Включить — задать repo/org variable
+    # CODEX_AUTO_REVIEW=true (по умолчанию переменной нет → условие ложно → джоб не бежит).
     # On-demand `@codex review` в комментарии работает всегда (см. codex-command.yml).
     # Осторожно на ПУБЛИЧНЫХ репо: риск инъекции инструкций из чужого PR.
     needs: [tests]
     if: >
-      false &&
+      vars.CODEX_AUTO_REVIEW == 'true' &&
       github.event.action == 'opened' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, codex]
