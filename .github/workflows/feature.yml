@@ -26,24 +26,11 @@ jobs:
           ruff format --check .
 
   tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install project + test deps (editable; pytest good practices)
-        run: |
-          pip install pytest
-          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
-      - name: Light tests (heavy excluded)
-        run: |
-          [ -d tests ] || { echo "::notice::нет каталога tests — пропуск"; exit 0; }
-          set +e; pytest -m "not heavy" -q; rc=$?
-          [ $rc -eq 5 ] && rc=0   # exit 5 = тесты не собраны → не падаем
-          exit $rc
+    # Лёгкие тесты (heavy исключены) только по окружениям, затронутым изменениями ветки.
+    uses: ./.github/workflows/_tests.yml
+    with:
+      markers: '-m "not heavy"'
+      affected: true
 
   security:
     runs-on: ubuntu-latest

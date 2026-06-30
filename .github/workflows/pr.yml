@@ -9,50 +9,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install project + test deps (editable; pytest good practices)
-        run: |
-          pip install pytest
-          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
-      - name: Unit tests
-        run: |
-          [ -d tests/unit ] || { echo "::notice::нет tests/unit — пропуск"; exit 0; }
-          set +e; pytest tests/unit -q; rc=$?
-          [ $rc -eq 5 ] && rc=0
-          exit $rc
-
-  integration-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install project + test deps (editable; pytest good practices)
-        run: |
-          pip install pytest
-          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
-      - name: Integration tests
-        run: |
-          [ -d tests/integration ] || { echo "::notice::нет tests/integration — пропуск"; exit 0; }
-          set +e; pytest tests/integration -q; rc=$?
-          [ $rc -eq 5 ] && rc=0
-          exit $rc
+  tests:
+    # Полный прогон по всем uv-окружениям (сервисным + корневому), включая heavy.
+    uses: ./.github/workflows/_tests.yml
 
   codex-review:
     # Отключённый по дефолту action - Особенно для публичных репозиториев есть риск попадания вредоносных инструкций в PR
     # Включить — убрать строку `false &&`
-    needs: [unit-tests, integration-tests]
+    needs: [tests]
     if: >
       false &&
       github.event.action == 'opened' &&
