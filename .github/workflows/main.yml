@@ -8,13 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       markers:
-        description: 'Какие тесты гонять'
-        type: choice
-        default: all
-        options:
-          - all          # все, включая heavy
-          - heavy         # только тяжёлые
-          - not heavy     # без тяжёлых
+        description: 'pytest -m выражение БЕЗ -m (пусто = все; heavy; not heavy; smoke or integration …)'
+        type: string
+        default: ''
 
 concurrency:
   group: main-ci-${{ github.ref }}
@@ -27,8 +23,6 @@ jobs:
   tests:
     uses: ./.github/workflows/_tests.yml
     with:
-      # push в main → все тесты; ручной запуск → выбранный маркер.
-      # markers — это choice (3 фикс. значения), поэтому значение, попадающее в
-      # pytest, не может содержать инъекцию. all/push → пусто (все тесты),
-      # иначе собираем безопасную -m "<expr>".
-      markers: ${{ (inputs.markers == 'heavy' || inputs.markers == 'not heavy') && format('-m "{0}"', inputs.markers) || '' }}
+      # push в main → inputs пуст → все тесты; ручной запуск → заданное выражение.
+      # _tests.yml кавычит markers и подставляет через env → инъекция невозможна.
+      markers: ${{ inputs.markers || '' }}

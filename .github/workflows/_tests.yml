@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       markers:
-        description: 'pytest -m expression; пусто = все тесты'
+        description: 'pytest -m выражение БЕЗ -m (напр. heavy, not heavy, smoke or integration); пусто = все'
         type: string
         default: ''
       affected:
@@ -61,6 +61,10 @@ jobs:
       - name: pytest (${{ matrix.env }})
         working-directory: ${{ matrix.env }}
         shell: bash
+        env:
+          # через env, а не подстановку в текст команды → произвольный markers
+          # не может выполнить shell (инъекция невозможна)
+          MARKERS: ${{ inputs.markers }}
         run: |
           # корневое окружение не должно повторно собирать тесты сервисов,
           # у которых есть собственное окружение. Берём ПОЛНЫЙ список обнаруженных
@@ -81,8 +85,11 @@ jobs:
           else
             envflag="--no-project"
           fi
+          # MARKERS берём из env и кавычим → одно выражение для -m, без инъекции
+          marker_args=()
+          [ -n "$MARKERS" ] && marker_args=(-m "$MARKERS")
           set +e
-          uv run $envflag --with pytest pytest $ignores ${{ inputs.markers }} -q
+          uv run $envflag --with pytest pytest $ignores "${marker_args[@]}" -q
           rc=$?
           [ $rc -eq 5 ] && rc=0   # ничего не собрано → не падаем (тестов ещё нет)
           exit $rc
