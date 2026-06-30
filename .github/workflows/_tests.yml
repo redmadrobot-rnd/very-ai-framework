@@ -73,8 +73,12 @@ jobs:
               ignores="$ignores --ignore=$e"
             done
           fi
+          # tooling-only окружение (pytest-конфиг без [project]) нельзя установить
+          # как пакет — запускаем pytest в эфемерном venv без проекта
+          projflag=""
+          grep -q '^\[project\]' pyproject.toml 2>/dev/null || projflag="--no-project"
           set +e
-          uv run --with pytest pytest $ignores ${{ inputs.markers }} -q
+          uv run $projflag --with pytest pytest $ignores ${{ inputs.markers }} -q
           rc=$?
           [ $rc -eq 5 ] && rc=0   # ничего не собрано → не падаем (тестов ещё нет)
           exit $rc

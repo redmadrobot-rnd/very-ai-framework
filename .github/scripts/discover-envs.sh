@@ -12,7 +12,10 @@
 # Запуск локально для проверки:  bash .github/scripts/discover-envs.sh
 set -euo pipefail
 
-is_uv_project() { grep -q '^\[project\]' "$1" 2>/dev/null; }
+# Тестовое окружение: установимый проект ([project]) ЛИБО каталог с pytest-конфигом
+# ([tool.pytest.*]). Второе — чтобы тесты не пропадали молча в tooling-only репозиториях
+# (pyproject только с настройками ruff/pytest, без [project]).
+is_test_env() { grep -qE '^\[(project|tool\.pytest)' "$1" 2>/dev/null; }
 
 # Печатает аргументы как компактный JSON-массив строк (без зависимости от jq).
 json_array() {
@@ -26,7 +29,7 @@ json_array() {
 
 envs=()
 
-if [ -f pyproject.toml ] && is_uv_project pyproject.toml; then
+if [ -f pyproject.toml ] && is_test_env pyproject.toml; then
   envs+=(".")
 fi
 
@@ -34,7 +37,7 @@ if [ -d services ]; then
   for svc in services/*/; do
     # манифесты сервиса по возрастанию глубины → берём первый с [project]
     while IFS= read -r manifest; do
-      if is_uv_project "$manifest"; then
+      if is_test_env "$manifest"; then
         envs+=("$(dirname "$manifest")")
         break
       fi
