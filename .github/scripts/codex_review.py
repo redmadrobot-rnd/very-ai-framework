@@ -5,7 +5,9 @@ Flow:
   2. compute the PR diff against the base branch;
   3. ask `codex exec` for structured JSON findings (subscription auth on the runner);
   4. keep only findings that land on a line actually present in the diff;
-  5. post inline threads as a PR review, and edit the placeholder into the summary (verdict).
+  5. if there are inline findings, post ONE PR review carrying the verdict/summary in its
+     body plus the inline threads, then delete the placeholder (single surface). With no
+     inline findings, edit the placeholder into the summary instead.
 
 Findings that can't be anchored to a diff line, and any parse/post failure,
 degrade into the summary comment — the job never hard-fails on review noise.
@@ -95,6 +97,11 @@ def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
 def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
     """Перезаписать тело ранее созданного issue-коммента."""
     gh_api("PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body})
+
+
+def delete_comment(repo: str, token: str, comment_id: int) -> None:
+    """Удалить issue-коммент (заглушку), когда итог уезжает в body ревью."""
+    gh_api("DELETE", f"/repos/{repo}/issues/comments/{comment_id}", token)
 
 
 def run(*args: str, **kwargs) -> str:
@@ -248,18 +255,25 @@ def main() -> None:
     summary = build_summary(verdict, parsed.get("summary", ""), orphans)
 
     # Inline-замечания по строкам — отдельным review (без них review создавать нельзя).
-    # Итоговый вердикт держим в коммент-заглушке, поэтому тело review — короткий указатель.
+    # Чтобы итог жил в ОДНОМ месте, кладём вердикт+summary прямо в body ревью, а
+    # коммент-заглушку удаляем. Если inline-находок нет (или привязка отклонена) —
+    # ревью не создаём и пишем итог в заглушку, как раньше.
     review_status = 200
     if inline:
         review = {
             "commit_id": head_sha,
-            "body": "🤖 Codex review — построчные замечания ниже; итог в комментарии Codex.",
+            "body": summary,
             "event": "COMMENT",
             "comments": inline,
         }
         review_status, _ = gh_api("POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review)
 
-    if review_status >= 300:
+    if inline and review_status < 300:
+        # итог уехал в body ревью → заглушка больше не нужна
+        if progress_id is not None:
+            delete_comment(repo, token, progress_id)
+        print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
+    elif review_status >= 300:
         # привязка inline отклонена — складываем все находки в итоговый коммент
         all_findings = orphans + [
             {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]} for c in inline
@@ -267,8 +281,9 @@ def main() -> None:
         finalize(build_summary(verdict, parsed.get("summary", ""), all_findings))
         print(f"reviews API returned {review_status}; put everything in summary comment")
     else:
+        # inline-находок нет — итог только в комменте
         finalize(summary)
-        print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
+        print(f"no inline findings; summary comment only, verdict={verdict}")
 
 
 if __name__ == "__main__":
