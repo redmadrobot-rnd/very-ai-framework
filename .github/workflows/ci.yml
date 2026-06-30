@@ -71,3 +71,32 @@ jobs:
           else
             echo "::notice::в pyproject нет [project].dependencies — аудит пропущен"
           fi
+
+  codex-review:
+    # ОПЦИЯ (выключена). Авто-ревью Codex при ОТКРЫТИИ PR. Включить — убрать `false &&`.
+    # On-demand `@codex review` в комментарии работает всегда (см. codex-command.yml).
+    # Осторожно на ПУБЛИЧНЫХ репо: риск инъекции инструкций из чужого PR.
+    needs: [tests-pr]
+    if: >
+      false &&
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, codex]
+    timeout-minutes: 20
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+      - name: Review PR with Codex (subscription)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/codex_review.py
