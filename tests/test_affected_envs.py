@@ -22,7 +22,7 @@ def base_commit(tmp_path):
 def change(tmp_path, rel):
     path = tmp_path / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("x")
+    path.write_text("changed")  # отлично от base, иначе нет диффа (README уже "x")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-qm", "c")
 
