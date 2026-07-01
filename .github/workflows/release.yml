@@ -67,7 +67,7 @@ jobs:
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           SRC="$PREFIX/$SVC:latest"
           if ! docker buildx imagetools inspect "$SRC" >/dev/null 2>&1; then
-            echo "::error::нет образа $SRC — сервис ещё ни разу не собран push-main. Релиз промоутит готовое, а не пересобирает."
+            echo "::error::образ $SRC недоступен: нет в реестре или нет прав на чтение пакета. Релиз промоутит готовое, а не пересобирает."
             exit 1
           fi
           echo "promote $SVC: :latest -> :$REF, :stable"
