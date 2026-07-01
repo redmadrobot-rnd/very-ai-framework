@@ -18,6 +18,7 @@ all_services() {
   for d in services/*/; do
     [ -d "$d" ] && basename "$d"
   done
+  return 0   # пустой глоб → последний [ -d ] = 1; под pipefail это роняло list/select
 }
 
 # строки из stdin → компактный JSON-массив (без jq-специфики)
