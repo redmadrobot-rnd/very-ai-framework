@@ -36,11 +36,11 @@ jobs:
 
       - name: Secret scan (рабочее дерево, не история)
         # filesystem-скан текущего состояния репо, а не всей git-истории:
-        # быстрее и по делу. Образ пинуем по версии-тегу (в идеале — по digest).
+        # быстрее и по делу. Образ пинуем по неизменяемому digest (тег в комментарии).
         run: |
           docker run --rm -v "$PWD:/repo" \
-            trufflesecurity/trufflehog:3.95.6 \
-            filesystem /repo --only-verified --fail
+            trufflesecurity/trufflehog@sha256:96f8429082cb2d4ae73b1096dcdb2f5aa139881d97042b0c5e5fa226a392e056 \
+            filesystem /repo --only-verified --fail  # v3.95.6
 
       - name: SAST
         uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1

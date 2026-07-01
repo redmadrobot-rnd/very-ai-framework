@@ -127,7 +127,7 @@ jobs:
           target: "/srv/deploy/${{ github.event.repository.name }}/dev"
 
       - name: Deploy to dev (:latest)
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         # dev деплоим по :latest — единый тег для всего deploy-набора: и только что
         # пересобранных сервисов, и незатронутых при редеплое конфига стека.
         env:
