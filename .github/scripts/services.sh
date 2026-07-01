@@ -8,9 +8,10 @@
 #          select:  $2 = 'all' либо список сервисов через запятую.
 # Алгоритм:
 #   list    — все каталоги services/*;
-#   changed — сервисы, чьи файлы изменились в base..head; правка docker-compose.yml
-#             или deploy.sh → пересобрать ВСЕ (влияет на весь стек);
-#   select  — 'all' → все; иначе список ∩ реальные каталоги (отсев мусора/инъекции).
+#   changed — сервисы с изменёнными файлами под services/<имя>/ (что пересобирать);
+#             конфиг стека (compose/deploy.sh) сюда НЕ входит — он про деплой, не про
+#             сборку образа (политику редеплоя стека решает deploy-dev.yml);
+#   select  — 'all' → все; иначе список ∩ реальные каталоги
 # Выход:   JSON-массив имён сервисов в stdout.
 set -euo pipefail
 
@@ -29,9 +30,9 @@ list_services() {
   all_services | json_array
 }
 
-# сервисы, чьи файлы изменились в base..head
+# сервисы с изменёнными файлами под services/<имя>/ (что пересобирать)
 changed_services() {
-  local base="$1" head="$2" files changed
+  local base="$1" head="$2" changed
   # base может отсутствовать (первый коммит/force-push) — берём предыдущий коммит,
   # а если и его нет — diff против пустого дерева git (все файлы считаются новыми).
   if ! git rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1; then
@@ -41,13 +42,7 @@ changed_services() {
       base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
     fi
   fi
-  files=$(git diff --name-only "$base" "$head")
-  # правка общего файла стека → пересобираем всё
-  if printf '%s\n' "$files" | grep -qE '^(docker-compose\.yml|\.github/scripts/deploy\.sh)$'; then
-    all_services | json_array
-    return
-  fi
-  changed=$(printf '%s\n' "$files" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
+  changed=$(git diff --name-only "$base" "$head" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
   comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | json_array
 }
 
