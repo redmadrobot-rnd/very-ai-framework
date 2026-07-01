@@ -43,9 +43,16 @@ jobs:
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
 
+  # Полный прогон тестов на релизном коммите. Упали → promote/deploy-prod не запустятся.
+  tests:
+    needs: verify-tag
+    uses: ./.github/workflows/_tests.yml
+    with:
+      markers: ''
+
   # Промоут: для каждого сервиса :latest -> :<vX> + :stable. Без сборки и без setup-buildx.
   promote:
-    needs: [verify-tag, discover]
+    needs: [verify-tag, discover, tests]
     if: ${{ needs.discover.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
