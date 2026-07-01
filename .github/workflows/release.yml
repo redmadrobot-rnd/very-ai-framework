@@ -120,6 +120,18 @@ jobs:
       group: deploy-prod
       cancel-in-progress: false
     steps:
+      - name: Preflight — prod-конфиг задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - name: Build .env (prod config)
