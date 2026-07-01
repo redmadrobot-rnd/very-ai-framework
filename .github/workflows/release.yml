@@ -1,10 +1,16 @@
-name: Release — stamp version & deploy prod
+name: Release — promote images & deploy prod
 
-# Триггер: тег v*. Релиз НЕ пересобирает то, что push-main уже собрал:
-# для каждого сервиса берётся готовый образ по sha его последнего изменения
-# (≤ тег) и ретегается на :<vX>+:stable (manifest-copy в реестре, без сборки).
-# Сборка — только fallback: образ не найден (multi-commit push / прочищен реестр).
-# Корректно и для тега на HEAD, и на старый коммит main (адресация по sha, не :latest).
+# Триггер: тег v*. Релиз НИЧЕГО не пересобирает.
+# push-main на каждый мерж в main уже собрал изменённые сервисы и пометил их
+# двумя тегами :<sha> и :latest. Сервис, который push-main не собирал, не менялся —
+# значит его :latest уже актуален для HEAD main. Поэтому релиз — это чистый promotion:
+# для КАЖДОГО сервиса берём текущий :latest и штампуем на него версию :<vX> + :stable
+# через `docker buildx imagetools create` (manifest-copy в реестре, секунды, без buildx-бутстрапа).
+# Если у сервиса нет :latest (ни разу не собран push-main) — падаем с понятной ошибкой,
+# а не чиним пересборкой на лету: релиз промоутит, а не строит.
+#
+# Тег ОБЯЗАН стоять на текущем HEAD main (см. verify-tag): промоут адресует :latest =
+# состояние HEAD, поэтому релиз со старого коммита промоутил бы не то состояние — запрещаем.
 
 on:
   push:
@@ -19,133 +25,66 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Tag must point at main
+      - name: Tag must point at current main HEAD
+        # Строгое равенство, а не is-ancestor: промоут берёт :latest = состояние HEAD.
+        # Тег на старом коммите промоутил бы HEAD-образы под «старой» версией — запрещаем.
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
-          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main \
-            || { echo "::error::tag ${GITHUB_REF_NAME} is not on main"; exit 1; }
+          HEAD_SHA=$(git rev-parse refs/remotes/origin/main)
+          [ "$GITHUB_SHA" = "$HEAD_SHA" ] || {
+            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на текущем HEAD main (${HEAD_SHA}). Релиз промоутит :latest = состояние HEAD — тег должен стоять на HEAD. Перетегни актуальный main."
+            exit 1
+          }
 
-  # План релиза: делит сервисы на «ретег готового» и «fallback-сборка».
-  # Для каждого сервиса резолвит sha последнего коммита (≤ тег), менявшего его
-  # билд-вход (его папка или общие deploy-файлы) — push-main пометил образ этим sha.
   discover:
     needs: verify-tag
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: read
     outputs:
-      build_list: ${{ steps.plan.outputs.build_list }}
-      retag_map:  ${{ steps.plan.outputs.retag_map }}
+      services: ${{ steps.s.outputs.services }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: plan
-        run: |
-          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          build='[]'; retag='[]'
-          for SVC in $(bash .github/scripts/services.sh list | jq -r '.[]'); do
-            SHA=$(git log -1 --format=%H "$GITHUB_SHA" -- \
-                    "services/$SVC/" docker-compose.yml \
-                    .github/scripts/deploy.sh .github/scripts/write-configs.sh)
-            if [ -n "$SHA" ] && docker buildx imagetools inspect "$PREFIX/$SVC:$SHA" >/dev/null 2>&1; then
-              retag=$(jq -c --arg s "$SVC" --arg sha "$SHA" '. + [{service:$s,sha:$sha}]' <<<"$retag")
-            else
-              build=$(jq -c --arg s "$SVC" '. + [$s]' <<<"$build")
-            fi
-          done
-          echo "build_list=$build" >> "$GITHUB_OUTPUT"
-          echo "retag_map=$retag"  >> "$GITHUB_OUTPUT"
-          echo "BUILD (fallback): $build"
-          echo "RETAG (готовые):  $retag"
+      - id: s
+        run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
 
-  # Ретег уже собранных образов: <svc>:<sha> -> :<vX> + :stable. Без сборки и buildx-бутстрапа.
-  retag:
+  # Промоут: для каждого сервиса :latest -> :<vX> + :stable. Без сборки и без setup-buildx.
+  promote:
     needs: [verify-tag, discover]
-    if: ${{ needs.discover.outputs.retag_map != '[]' }}
+    if: ${{ needs.discover.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Stamp version onto prebuilt images
-        env:
-          RETAG_MAP: ${{ needs.discover.outputs.retag_map }}
-          REF: ${{ github.ref_name }}
-        run: |
-          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          jq -c '.[]' <<<"$RETAG_MAP" | while read -r row; do
-            SVC=$(jq -r '.service' <<<"$row"); SHA=$(jq -r '.sha' <<<"$row")
-            echo "retag $SVC: :$SHA -> :$REF, :stable"
-            docker buildx imagetools create \
-              -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$PREFIX/$SVC:$SHA"
-          done
-
-  # Fallback-сборка: только сервисы без готового образа (в норме матрица пуста → джоба скипается).
-  build:
-    needs: [verify-tag, discover]
-    if: ${{ needs.discover.outputs.build_list != '[]' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJson(needs.discover.outputs.build_list) }}
+        service: ${{ fromJson(needs.discover.outputs.services) }}
     steps:
-      - uses: actions/checkout@v4
-
-      - id: img
-        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
-        with:
-          context: services/${{ matrix.service }}
-          push: true
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-          tags: |
-            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ github.ref_name }}
-            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:stable
+      - name: Stamp version onto current image
+        env:
+          SVC: ${{ matrix.service }}
+          REF: ${{ github.ref_name }}
+        run: |
+          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          SRC="$PREFIX/$SVC:latest"
+          if ! docker buildx imagetools inspect "$SRC" >/dev/null 2>&1; then
+            echo "::error::образ $SRC недоступен: нет в реестре или нет прав на чтение пакета. Релиз промоутит готовое, а не пересобирает."
+            exit 1
+          fi
+          echo "promote $SVC: :latest -> :$REF, :stable"
+          docker buildx imagetools create \
+            -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$SRC"
 
   deploy-prod:
-    needs: [discover, retag, build]
-    # Запускаемся, если discover ок, найден хотя бы один сервис, и ни retag, ни
-    # build не упали (skipped — допустимо: один из списков может быть пуст).
-    if: >-
-      ${{ always()
-          && needs.discover.result == 'success'
-          && !(needs.discover.outputs.build_list == '[]' && needs.discover.outputs.retag_map == '[]')
-          && needs.retag.result != 'failure' && needs.retag.result != 'cancelled'
-          && needs.build.result  != 'failure' && needs.build.result  != 'cancelled' }}
+    needs: [discover, promote]
+    if: ${{ needs.discover.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
