@@ -1,11 +1,15 @@
-name: Push main — build changed & deploy dev
+name: Build changed & deploy dev
 
+# Автоматика на мерж в main: собрать образы ТОЛЬКО изменённых сервисов и выкатить
+# их на dev. Тесты/чеки здесь не гоняются — гейт был на PR; полный прогон — вручную
+# (manual-tests.yml). changed → build (матрица по сервисам) → deploy-dev.
 on:
   push:
     branches: [main]
 
 jobs:
   changed:
+    # изменённые сервисы между прошлым и текущим состоянием main → матрица для build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

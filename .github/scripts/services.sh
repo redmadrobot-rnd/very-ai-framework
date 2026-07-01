@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Обнаружение сервисов проекта — без хардкода имён. Сервис = каталог под services/.
 #
-#   services.sh list                   -> JSON-массив всех сервисов
-#   services.sh changed <base> <head>  -> JSON-массив сервисов, изменённых между refs
-#   services.sh select <input>         -> JSON-массив: 'all' либо список через запятую
+# Когда:   джоб changed в deploy-dev.yml (и manual.yml) — определить, что собирать.
+# Зачем:   обнаружить сервисы без хардкода имён. Сервис = каталог под services/.
+# Вход:    $1 = режим list | changed | select;
+#          changed: $2 = base ref, $3 = head ref (дифф между ними);
+#          select:  $2 = 'all' либо список сервисов через запятую.
+# Алгоритм:
+#   list    — все каталоги services/*;
+#   changed — сервисы, чьи файлы изменились в base..head; правка docker-compose.yml
+#             или deploy.sh → пересобрать ВСЕ (влияет на весь стек);
+#   select  — 'all' → все; иначе список ∩ реальные каталоги (отсев мусора/инъекции).
+# Выход:   JSON-массив имён сервисов в stdout.
 set -euo pipefail
 
 mode="${1:-list}"

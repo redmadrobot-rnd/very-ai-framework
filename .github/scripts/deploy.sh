@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Deploy services to an environment on this host. Invoked over SSH by CI.
 #
-# Usage: deploy.sh <env> <owner/repo> <tag> [services]
-#   env        — имя окружения (dev/prod/...)
-#   owner/repo — префикс образов GHCR (ghcr.io/<owner/repo>/<svc>); имя репо = имя проекта
-#   tag        — тег образа
-#   services   — опционально: список через запятую/пробел; пусто/"all" = все
-#
-# Каталог деплоя: /srv/deploy/<project>/<env> — неймспейс по проекту, чтобы на одном
-# хосте уживалось несколько проектов. compose-стек изолирован по COMPOSE_PROJECT_NAME.
-#
-# GHCR-креды из env: GHCR_USER, GHCR_TOKEN. Никаких project-specific значений.
+# Когда:   шаг deploy в deploy-dev.yml / manual.yml — исполняется по SSH на хосте окружения.
+# Зачем:   выкатить сервисы окружения из GHCR-образов; без project-specific значений.
+# Вход:    $1 = env (dev/prod/…); $2 = owner/repo (префикс GHCR, имя репо = проект);
+#          $3 = tag образа; $4 = (опц.) сервисы через запятую/пробел, пусто/"all" = все.
+#          GHCR-креды — из env: GHCR_USER, GHCR_TOKEN.
+# Алгоритм:
+#   валидация env и имени проекта; каталог /srv/deploy/<project>/<env> (неймспейс по
+#   проекту — на одном хосте уживается несколько); COMPOSE_PROJECT_NAME=<project>-<env>
+#   (изоляция стеков); docker login ghcr.io → docker compose pull → up -d --wait.
+# Выход:   развёрнутый стек; docker compose ps в лог; ненулевой код при ошибке.
 set -euo pipefail
 
 ENVIRONMENT="$1"

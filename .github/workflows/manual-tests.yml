@@ -1,0 +1,34 @@
+name: Full tests (manual)
+
+# Ручной полный прогон CI на любой ветке (workflow_dispatch). На мерж в main
+# автоматически НЕ запускается — там только build+deploy (deploy-dev.yml).
+# Нужен, чтобы по кнопке прогнать всё/heavy (напр. перед релизом) или сузить -m.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ветка/тег/sha для прогона (пусто = ветка из «Use workflow from»)'
+        type: string
+        default: ''
+      markers:
+        description: 'pytest -m <your input>(пусто = all, heavy; not heavy; smoke or integration …)'
+        type: string
+        default: ''
+
+concurrency:
+  group: manual-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/_checks.yml
+    with:
+      ref: ${{ inputs.ref }}
+
+  tests:
+    uses: ./.github/workflows/_tests.yml
+    with:
+      # ручной прогон → всегда все тест-каталоги (changed_only вне PR смысла не имеет:
+      # нет базы для диффа). markers кавычится и подставляется через env → без инъекции.
+      markers: ${{ inputs.markers }}
+      ref: ${{ inputs.ref }}

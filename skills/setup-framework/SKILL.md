@@ -137,7 +137,7 @@ Add or update a single doc later with **`/kb-doc <topic>`**.
 
 ```bash
 mkdir -p .github/workflows .github/scripts
-cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
+cp /tmp/aifw-template/.github/workflows/{pr,manual-tests,deploy-dev,release,manual-deploy,codex-command,claude,_checks,_tests}.yml .github/workflows/
 cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
 cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
 ```
