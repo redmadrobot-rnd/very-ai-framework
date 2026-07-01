@@ -1,10 +1,9 @@
 name: Codex commands (on demand)
 
-# Codex-команды в PR-комментарии (основной способ запускать ревью; авто-проход в
-# pr.yml — отключённый action, `if: false`):
-#   "@codex review" — ревью PR по запросу участника репо;
-#   "@codex answer <вопрос>" — ответ Codex с контекстом PR; работает и в общем треде
-#     (issue_comment), и как reply под inline-находкой ревью (pull_request_review_comment).
+# Codex-команды в PR-комментарии (от участника репо):
+#   "@codex review"   — ревью PR;
+#   "@codex <вопрос>" — ответ Codex (любой @codex, кроме "@codex review");
+#     работает в общем треде и как reply под inline-находкой ревью.
 
 on:
   issue_comment:
@@ -38,10 +37,11 @@ jobs:
         run: python3 .github/scripts/codex_review.py
 
   codex-answer:
-    # Триггер: PR-коммент "@codex answer <вопрос>" от участника репо (OWNER/MEMBER/COLLABORATOR).
+    # Триггер: "@codex <вопрос>" (кроме "@codex review") от участника репо.
     if: >
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@codex answer') &&
+      contains(github.event.comment.body, '@codex') &&
+      !contains(github.event.comment.body, '@codex review') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
     timeout-minutes: 20
@@ -64,11 +64,11 @@ jobs:
         run: python3 .github/scripts/codex_answer.py
 
   codex-answer-inline:
-    # Триггер: "@codex answer" как reply ПОД inline-комментарием ревью (в т.ч. под находкой Codex).
-    # Это отдельное событие pull_request_review_comment — у него своя структура payload.
+    # Триггер: "@codex <вопрос>" (кроме "@codex review") как reply под inline-находкой ревью.
     if: >
       github.event_name == 'pull_request_review_comment' &&
-      contains(github.event.comment.body, '@codex answer') &&
+      contains(github.event.comment.body, '@codex') &&
+      !contains(github.event.comment.body, '@codex review') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
     timeout-minutes: 20

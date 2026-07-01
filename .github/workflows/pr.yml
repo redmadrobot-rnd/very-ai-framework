@@ -1,8 +1,5 @@
 name: PR CI
 
-# Гейт по PR: быстро и дёшево — затронутые тест-каталоги, без heavy. На push в feature
-# CI не запускается, до PR качество держит pre-commit. Полный прогон с heavy —
-# вручную (см. manual-tests.yml).
 on:
   pull_request:
 

@@ -1,8 +1,7 @@
 name: Full tests (manual)
 
-# Ручной полный прогон CI на любой ветке (workflow_dispatch). На мерж в main
-# автоматически НЕ запускается — там только build+deploy (deploy-dev.yml).
-# Нужен, чтобы по кнопке прогнать всё/heavy (напр. перед релизом) или сузить -m.
+# Ручной полный прогон CI на любой ветке (workflow_dispatch).
+# Нужен, чтобы по кнопке прогнать всё/heavy/прочие маркеры
 on:
   workflow_dispatch:
     inputs:

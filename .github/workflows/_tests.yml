@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       markers:
-        description: 'pytest -m выражение БЕЗ -m (напр. heavy, not heavy, smoke or integration); пусто = все'
+        description: 'pytest -m <markers here> (напр. heavy, not heavy, smoke or integration); пусто = все'
         type: string
         default: ''
       changed_only:

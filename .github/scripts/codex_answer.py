@@ -1,9 +1,9 @@
-"""Codex PR conversational answerer — replies to `@codex answer`.
+"""Codex PR conversational answerer — replies to `@codex <question>`.
 
 Two modes (set by MODE env):
-  issue  — `@codex answer` in the PR conversation; reads PR meta + diff + the
+  issue  — `@codex …` in the PR conversation; reads PR meta + diff + the
            issue-comment thread; posts a PR comment (placeholder -> edited).
-  inline — `@codex answer` as a reply under an inline review comment (e.g. under a
+  inline — `@codex …` as a reply under an inline review comment (e.g. under a
            Codex finding); reads the code hunk + that review thread; replies IN the
            thread (placeholder reply -> edited).
 
@@ -24,7 +24,7 @@ from codex_review import edit_comment, env, gh_api, post_comment, run
 
 MAX_DIFF = 60000
 MAX_COMMENT = 4000
-TRIGGER = "@codex answer"
+TRIGGER = "@codex"
 
 ISSUE_PROMPT = """\
 You are Codex, answering a question in a GitHub pull request discussion. Be concise,
@@ -76,7 +76,7 @@ def pr_meta_and_diff(repo: str, pr: str, token: str) -> tuple[dict, str]:
 
 
 def answer_issue(repo: str, pr: str, token: str, question: str) -> None:
-    """`@codex answer` в общем треде PR → коммент (заглушка → обновление)."""
+    """`@codex …` в общем треде PR → коммент (заглушка → обновление)."""
     progress_id = post_comment(repo, pr, token, "🤖 **Codex** — думаю над ответом… ⏳")
 
     def finalize(text: str) -> None:
@@ -152,7 +152,7 @@ def review_thread(repo: str, pr: str, token: str, comment_id: int) -> tuple[dict
 
 
 def answer_inline(repo: str, pr: str, token: str, question: str, comment_id: int) -> None:
-    """`@codex answer` под inline-находкой → reply в том же треде (заглушка → обновление)."""
+    """`@codex …` под inline-находкой → reply в том же треде (заглушка → обновление)."""
     progress_id = reply_review_comment(repo, pr, token, comment_id, "🤖 **Codex** — думаю над ответом… ⏳")
 
     def finalize(text: str) -> None:
