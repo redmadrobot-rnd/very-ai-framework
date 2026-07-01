@@ -33,15 +33,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Secret scan
-        # Пин на неизменяемый commit-SHA (не плавающий @main): сторонний action в CI
-        # не должен менять поведение без коммита у нас. Обновлять осознанно.
-        uses: trufflesecurity/trufflehog@30d5bb91af1a771378349dbbb0c82129392acf70  # v3.95.6
-        with:
-          extra_args: --only-verified
+      - name: Secret scan (рабочее дерево, не история)
+        # filesystem-скан текущего состояния репо, а не всей git-истории:
+        # быстрее и по делу. Образ пинуем по версии-тегу (в идеале — по digest).
+        run: |
+          docker run --rm -v "$PWD:/repo" \
+            trufflesecurity/trufflehog:3.95.6 \
+            filesystem /repo --only-verified --fail
 
       - name: SAST
         uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1

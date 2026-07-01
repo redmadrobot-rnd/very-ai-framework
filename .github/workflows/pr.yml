@@ -1,6 +1,6 @@
 name: PR CI
 
-# Гейт по PR: быстро и дёшево — затронутые окружения, без heavy. На push в feature
+# Гейт по PR: быстро и дёшево — затронутые тест-каталоги, без heavy. На push в feature
 # CI не запускается, до PR качество держит pre-commit. Полный прогон с heavy — на
 # push в main (см. main.yml).
 on:
@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/_tests.yml
     with:
       markers: 'not heavy'
-      affected: true
+      changed_only: true
 
   codex-review:
     # ОПЦИЯ. Авто-ревью Codex при ОТКРЫТИИ PR. Включить — задать repo/org variable

@@ -16,7 +16,7 @@ CI находит тесты сам — по `pyproject.toml`. Работает 
 
 ## Когда что гоняется
 
-| событие | окружения | тесты |
+| событие | тест-каталоги | тесты |
 |---|---|---|
 | PR в `main` | только затронутые изменениями | `-m "not heavy"` |
 | push в `main` (после мержа) | все | все, включая `heavy` |
@@ -52,5 +52,5 @@ addopts = "--strict-markers"
 ## Проверить локально
 
 ```bash
-bash .github/scripts/discover-envs.sh   # какие окружения видит CI
+bash .github/scripts/discover-test-dirs.sh   # какие тест-каталоги видит CI
 ```

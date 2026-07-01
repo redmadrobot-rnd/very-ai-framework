@@ -7,8 +7,8 @@ on:
         description: 'pytest -m выражение БЕЗ -m (напр. heavy, not heavy, smoke or integration); пусто = все'
         type: string
         default: ''
-      affected:
-        description: 'true = только окружения, затронутые изменениями ветки'
+      changed_only:
+        description: 'true = только тест-каталоги, затронутые изменениями ветки'
         type: boolean
         default: false
       python-version:
@@ -20,36 +20,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      envs: ${{ steps.find.outputs.envs }}   # окружения для матрицы (на feature — affected)
-      all: ${{ steps.find.outputs.all }}      # все обнаруженные (для корректного --ignore)
+      test_dirs: ${{ steps.find.outputs.test_dirs }}          # каталоги для матрицы (при changed_only — только затронутые)
+      all_test_dirs: ${{ steps.find.outputs.all_test_dirs }}  # все обнаруженные (для корректного --ignore в корне)
     steps:
       - uses: actions/checkout@v4
         with:
-          # affected требует полную историю для merge-base; иначе хватает HEAD
-          fetch-depth: ${{ inputs.affected && '0' || '1' }}
+          # changed_only требует полную историю для merge-base; иначе хватает HEAD
+          fetch-depth: ${{ inputs.changed_only && '0' || '1' }}
       - id: find
         shell: bash
         env:
-          AFFECTED: ${{ inputs.affected }}
+          CHANGED_ONLY: ${{ inputs.changed_only }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          all=$(bash .github/scripts/discover-envs.sh)
-          envs="$all"
-          if [ "$AFFECTED" = "true" ] && [ "$all" != "[]" ]; then
-            base=$(bash .github/scripts/affected-base.sh "$DEFAULT_BRANCH")
-            envs=$(bash .github/scripts/affected-envs.sh "$all" "$base")
+          all=$(bash .github/scripts/discover-test-dirs.sh)
+          dirs="$all"
+          if [ "$CHANGED_ONLY" = "true" ] && [ "$all" != "[]" ]; then
+            dirs=$(bash .github/scripts/changed-test-dirs.sh "$all" "$DEFAULT_BRANCH")
           fi
-          echo "all=$all"   >> "$GITHUB_OUTPUT"
-          echo "envs=$envs" >> "$GITHUB_OUTPUT"
-          echo "::notice::test envs: $envs (discovered: $all)"
+          echo "all_test_dirs=$all" >> "$GITHUB_OUTPUT"
+          echo "test_dirs=$dirs"    >> "$GITHUB_OUTPUT"
+          echo "::notice::test dirs: $dirs (discovered: $all)"
 
   test:
     needs: discover
-    if: needs.discover.outputs.envs != '[]'
+    if: needs.discover.outputs.test_dirs != '[]'
     strategy:
       fail-fast: false
       matrix:
-        env: ${{ fromJSON(needs.discover.outputs.envs) }}
+        test_dir: ${{ fromJSON(needs.discover.outputs.test_dirs) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -58,23 +57,23 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
       - run: pip install uv
-      - name: pytest (${{ matrix.env }})
-        working-directory: ${{ matrix.env }}
+      - name: pytest (${{ matrix.test_dir }})
+        working-directory: ${{ matrix.test_dir }}
         shell: bash
         env:
           # через env, а не подстановку в текст команды → произвольный markers
           # не может выполнить shell (инъекция невозможна)
           MARKERS: ${{ inputs.markers }}
         run: |
-          # корневое окружение не должно повторно собирать тесты сервисов,
-          # у которых есть собственное окружение. Берём ПОЛНЫЙ список обнаруженных
-          # (outputs.all), а не affected-подмножество — иначе при affected-прогоне
-          # корень мог бы случайно собрать тесты незатронутого сервиса.
+          # корневой тест-каталог (.) не должен повторно собирать тесты вложенных
+          # каталогов со своим окружением. Берём ПОЛНЫЙ список (all_test_dirs), а не
+          # changed-подмножество — иначе при changed_only корень мог бы собрать
+          # тесты незатронутого каталога.
           ignores=""
-          if [ "${{ matrix.env }}" = "." ]; then
-            for e in $(printf '%s' '${{ needs.discover.outputs.all }}' | grep -o '"[^"]*"' | tr -d '"'); do
-              [ "$e" = "." ] && continue
-              ignores="$ignores --ignore=$e"
+          if [ "${{ matrix.test_dir }}" = "." ]; then
+            for d in $(printf '%s' '${{ needs.discover.outputs.all_test_dirs }}' | grep -o '"[^"]*"' | tr -d '"'); do
+              [ "$d" = "." ] && continue
+              ignores="$ignores --ignore=$d"
             done
           fi
           # [project] → ставим проект + dev-группу + все extras (тест-зависимости:

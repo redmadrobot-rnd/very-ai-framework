@@ -1,7 +1,7 @@
 name: Full tests (main)
 
 # Полный прогон после мержа в main + ручной запуск по кнопке (на любой выбранной
-# ветке). Ловит то, что узкий PR-гейт (affected + not heavy) пропускает.
+# ветке). Ловит то, что узкий PR-гейт (changed_only + not heavy) пропускает.
 on:
   push:
     branches: [main]
