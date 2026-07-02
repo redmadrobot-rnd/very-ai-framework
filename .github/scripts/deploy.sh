@@ -54,5 +54,5 @@ echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:
 # shellcheck disable=SC2086
 docker compose pull $SERVICES
 # shellcheck disable=SC2086
-docker compose up -d --wait --wait-timeout 300 $SERVICES
+docker compose up -d --wait --wait-timeout 300 --force-recreate $SERVICES
 docker compose ps
