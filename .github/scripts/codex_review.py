@@ -28,6 +28,7 @@ import urllib.request
 
 API = "https://api.github.com"
 SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+MAX_DIFF = 60000  # держит вход в пределах контекста модели
 
 # Префикс с контекстом ветки добавляется ТОЛЬКО когда worktree реально поднят
 # (codex запущен в коде PR). Иначе промпт не должен заявлять о доступности файлов —
@@ -132,7 +133,7 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
                 new_ln += 1
             elif raw.startswith(" "):
                 new_ln += 1
-            # '-' deletions and '\' markers don't advance the new-file counter
+            # '-' deletions and '\\' markers don't advance the new-file counter
     return lines
 
 
@@ -187,10 +188,22 @@ def main() -> None:
         err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
         finalize(f"🤖 Codex review: не смог получить изменения (git fetch упал).\n\n```\n{err}\n```")
         sys.exit("git fetch failed")
-    diff = run("git", "diff", f"origin/{base}...FETCH_HEAD").strip()
+    # Сгенерённые/шумные файлы не ревьюятся, но раздувают вход — исключаем из дифа.
+    diff_pathspec = [
+        ".",
+        ":(exclude)**/*.lock",
+        ":(exclude)**/*-lock.json",
+        ":(exclude)**/*.lockb",
+        ":(exclude)**/*.min.*",
+        ":(exclude)**/*.snap",
+    ]
+    diff = run("git", "diff", f"origin/{base}...FETCH_HEAD", "--", *diff_pathspec).strip()
     if not diff:
         finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
+    if len(diff) > MAX_DIFF:
+        # строки за отсечкой теряют inline-привязку (уедут в summary), но код codex дочитает из worktree
+        diff = diff[:MAX_DIFF] + "\n\n[diff обрезан по лимиту размера; полный код ветки доступен в рабочей папке]"
 
     # codex обрабатывает недоверенный код PR. Токен ему не нужен — убираем GH_TOKEN из
     # окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
@@ -213,13 +226,14 @@ def main() -> None:
     # уйдёт в сеть. --cd: рабочая папка codex = код ветки PR (или main, если worktree не встал).
     # Префикс о доступности файлов даём ТОЛЬКО при поднятом worktree — иначе промпт врал бы
     # codex'у про PR-контекст и тот ревьюил бы файлы default-ветки как будто это PR.
+    # Промпт с дифом уходит через stdin (`codex exec -`): дифф в argv упёрся бы в ARG_MAX.
     codex_argv = ["codex", "exec", "--sandbox", "read-only"]
     prompt = PROMPT + diff
     if pr_cwd:
         codex_argv += ["--cd", pr_cwd]
         prompt = PR_CONTEXT_NOTE + prompt
     try:
-        raw = run(*codex_argv, prompt, timeout=600, env=codex_env)
+        raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
     except Exception as exc:  # noqa: BLE001 — любой сбой codex не должен оставить заглушку висеть
         finalize(f"🤖 Codex review: не удалось выполнить codex.\n\n```\n{str(exc)[:1000]}\n```")
         sys.exit(f"codex exec failed: {exc}")
