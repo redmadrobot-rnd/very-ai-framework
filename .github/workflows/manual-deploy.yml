@@ -161,11 +161,12 @@ jobs:
           # санитизированный список из discover (через пробел — формат deploy.sh),
           # а не сырой inputs.service: иначе опечатка в списке прошла бы в деплой.
           DEPLOY_SERVICE: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
+          COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICE
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICE,COMPOSE_PROFILES
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/$DEPLOY_ENV/.github/scripts/deploy.sh"
             "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICE"

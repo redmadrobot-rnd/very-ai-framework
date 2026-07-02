@@ -46,6 +46,9 @@ cd "$DIR"
 export GITHUB_REPOSITORY="$REPO" TAG="$TAG"
 export IMAGE_PREFIX="ghcr.io/${REPO,,}"
 export COMPOSE_PROJECT_NAME="$CPN"
+# какой поднабор сервисов поднимать на окружении (compose profiles); приходит из
+# Environment Variable COMPOSE_PROFILES через ssh-action. Пусто = все дефолтные сервисы.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 
 echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:-all}'"
 # shellcheck disable=SC2086

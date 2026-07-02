@@ -172,9 +172,10 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES
           script: bash /srv/deploy/${{ github.event.repository.name }}/prod/.github/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}
