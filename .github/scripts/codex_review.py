@@ -222,11 +222,8 @@ def main() -> None:
         # worktree не встал — деградируем к старому поведению (контекст = только дифф).
         print(f"worktree add failed, fallback diff-only: {add.stderr.strip()[:300]}")
 
-    # --sandbox read-only: даже успешная prompt-injection из кода PR не запишет файлы и не
-    # уйдёт в сеть. --cd: рабочая папка codex = код ветки PR (или main, если worktree не встал).
-    # Префикс о доступности файлов даём ТОЛЬКО при поднятом worktree — иначе промпт врал бы
+    # Префикс о доступности файлов — ТОЛЬКО при поднятом worktree, иначе промпт врал бы
     # codex'у про PR-контекст и тот ревьюил бы файлы default-ветки как будто это PR.
-    # Промпт с дифом уходит через stdin (`codex exec -`): дифф в argv упёрся бы в ARG_MAX.
     codex_argv = ["codex", "exec", "--sandbox", "read-only"]
     prompt = PROMPT + diff
     if pr_cwd:
