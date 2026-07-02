@@ -3,7 +3,7 @@ name: Release — promote images & deploy prod
 # Триггер: тег v*.
 # Шаги: prepare (tag == HEAD main + пин каждого образа в digest по :<sha> последнего
 #        коммита main, менявшего сервис) → tests →
-# promote (digest → :vX + :stable) → deploy-prod.
+# promote (digest → :vX) → deploy-prod. Откат — деплой предыдущего :vX (manual-deploy, build=off).
 
 on:
   push:
@@ -78,7 +78,7 @@ jobs:
     with:
       markers: ''
 
-  # Промоут: для каждого сервиса зафиксированный digest -> :<vX> + :stable. Без сборки.
+  # Промоут: для каждого сервиса зафиксированный digest -> :<vX>. Без сборки.
   promote:
     needs: [prepare, tests]
     if: ${{ needs.prepare.outputs.services != '[]' }}
@@ -106,9 +106,8 @@ jobs:
         run: |
           [ -n "$DIGEST" ] || { echo "::error::нет зафиксированного digest для $SVC"; exit 1; }
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          echo "promote $SVC: $DIGEST -> :$REF, :stable"
-          docker buildx imagetools create \
-            -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$PREFIX/$SVC@$DIGEST"
+          echo "promote $SVC: $DIGEST -> :$REF"
+          docker buildx imagetools create -t "$PREFIX/$SVC:$REF" "$PREFIX/$SVC@$DIGEST"
 
   deploy-prod:
     needs: [prepare, promote]
