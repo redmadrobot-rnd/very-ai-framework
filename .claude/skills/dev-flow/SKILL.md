@@ -54,6 +54,11 @@ The goal is the **minimal viable path**. In dialogue with the user the agent:
 - compares with alternatives and **justifies** the engineering decisions made.
 **The output is agreed with the user:** the stack is fixed, the HLD is described.
 
+Working artifacts of the run (proposal, research notes, HLD, task breakdown) live in
+**`docs/work/<feature>/`** — in git, but outside the KB (`docs/gitmark/`): they are dated
+snapshots of intent, nobody updates them after the run, and KB search/lint must not
+surface them as current knowledge.
+
 ## 5. Tasks and /goal — the agent writes the plan, the human accepts it
 The accumulated context (HLD + stack + decisions) is sliced into tasks per the
 **`task-breakdown`** skill: self-contained units, written "by an agent for agents", with a
@@ -72,7 +77,7 @@ update tasks/specs → e2e → try it locally → performance. Interaction rules
   for ~an hour → change the approach instead of hammering the same one.
 
 ## 7. pre-commit → CI/PR — automation, the agent only reacts
-Locally before a commit: `ruff`, tests, secret scan — **any step fails → don't commit,
+Locally before a commit: `ruff`, secret scan — **any step fails → don't commit,
 fix it**, don't bother the human. Then push (no CI on feature — pre-commit holds quality),
 open PR → checks + tests; Codex review on demand (`@codex review`, questions via `@codex …`).
 On Codex comments (severity high/medium) and on the `@claude` tag the agent makes the edits.
@@ -80,8 +85,10 @@ On Codex comments (severity high/medium) and on the `@claude` tag the agent make
 ## 8. Review and deploy — the human has the final word
 With the PR the agent attaches a **short digest of the specs and key engineering decisions**
 (for the reviewer to look at: data models and DB entities, indexes, protocols, API endpoints).
-Merge — **after human approval**. dev/prod deploy is automatic. After it — the agent updates
-the project overview (pages/miro) and the changelog.
+Merge — **after human approval**. dev/prod deploy is automatic. After it — the agent
+**distills the results into the KB**: updates the `service`/`reference` docs to match what
+was actually built, records a `decision` (ADR) if an architectural choice was made. The
+plan in `docs/work/` stays as-is — history, not documentation.
 
 ## Interaction principles
 - Ask **before** starting whatever isn't derivable from the code; silently gather what is.
