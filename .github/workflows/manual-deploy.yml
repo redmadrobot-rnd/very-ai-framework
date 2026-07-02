@@ -149,8 +149,6 @@ jobs:
           target: "/srv/deploy/${{ github.event.repository.name }}/${{ inputs.environment }}"
       - name: Deploy via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
-        # Все подстановки идут через env и пробрасываются в удалённый шелл (envs:),
-        # где раскрываются как данные — а не вклеиваются в текст script (script injection).
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -158,15 +156,14 @@ jobs:
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
-          # санитизированный список из discover (через пробел — формат deploy.sh),
-          # а не сырой inputs.service: иначе опечатка в списке прошла бы в деплой.
-          DEPLOY_SERVICE: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
+          # список из discover, а не сырой inputs.service — опечатка не проходит в деплой
+          DEPLOY_SERVICES: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICE,COMPOSE_PROFILES
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICES,COMPOSE_PROFILES
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/$DEPLOY_ENV/.github/scripts/deploy.sh"
-            "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICE"
+            "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICES"
