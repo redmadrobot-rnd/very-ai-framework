@@ -47,14 +47,13 @@ def ask_codex(prompt: str) -> str:
     """Запустить codex exec и вернуть ТОЛЬКО финальное сообщение (через -o).
 
     GH_TOKEN вычищаем из окружения подпроцесса: codex обрабатывает недоверенный текст
-    (дифф/комментарии автора PR) — секрет ему не нужен. Промпт уходит через stdin
-    (`codex exec -`): большой контекст в argv упёрся бы в ARG_MAX.
+    (дифф/комментарии автора PR) — секрет ему не нужен.
     """
     codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
     with tempfile.NamedTemporaryFile("w+", suffix=".md", delete=False, encoding="utf-8") as tf:
         out_path = tf.name
     try:
-        run("codex", "exec", "-o", out_path, "-", input=prompt, timeout=600, env=codex_env)
+        run("codex", "exec", "--sandbox", "read-only", "-o", out_path, "-", input=prompt, timeout=600, env=codex_env)
         with open(out_path, encoding="utf-8") as fh:
             return fh.read().strip()
     finally:
