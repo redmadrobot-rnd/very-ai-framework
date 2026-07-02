@@ -53,10 +53,6 @@ export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:-all}'"
 # shellcheck disable=SC2086
 docker compose pull $SERVICES
-# --force-recreate: правка ТОЛЬКО конфига/.env без смены образа иначе не применится —
-# compose пересоздаёт контейнер по хешу спеки (образ/env/labels/маунты), а содержимое
-# bind-mount'ов (configs/*) в хеш не входит: файл доедет, но процесс не перечитает.
-# Пересоздаём только затронутые деплоем сервисы ($SERVICES); при deploy=all — весь стек.
 # shellcheck disable=SC2086
 docker compose up -d --wait --wait-timeout 300 --force-recreate $SERVICES
 docker compose ps
