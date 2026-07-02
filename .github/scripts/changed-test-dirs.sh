@@ -25,6 +25,7 @@ IGNORE_GLOBS=(
   '.gitignore' '.gitattributes' '.editorconfig' '.gitmark/*' '.github/*'
   '.pre-commit-config.yaml' '.flake8' 'ruff.toml' '.ruff.toml'
   '.pylintrc' 'mypy.ini' '.mypy.ini' '.markdownlint*' '.yamllint*'
+  'docker-compose.yml' 'docker-compose.yaml'
 )
 
 is_ignored() {
