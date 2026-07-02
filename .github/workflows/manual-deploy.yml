@@ -156,7 +156,6 @@ jobs:
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
-          # список из discover, а не сырой inputs.service — опечатка не проходит в деплой
           DEPLOY_SERVICES: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
         with:
