@@ -141,11 +141,14 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_PROJECT: ${{ github.event.repository.name }}
+          DEPLOY_SERVICES: ${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_SERVICES
           script: >
-            bash /srv/deploy/${{ github.event.repository.name }}/dev/.github/scripts/deploy.sh dev ${{ github.repository }} latest
-            "${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}"
+            bash "/srv/deploy/$DEPLOY_PROJECT/dev/.github/scripts/deploy.sh"
+            dev "$DEPLOY_REPO" latest "$DEPLOY_SERVICES"

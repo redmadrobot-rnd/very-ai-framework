@@ -160,9 +160,14 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_PROJECT: ${{ github.event.repository.name }}
+          DEPLOY_TAG: ${{ github.ref_name }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES
-          script: bash /srv/deploy/${{ github.event.repository.name }}/prod/.github/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG
+          script: >
+            bash "/srv/deploy/$DEPLOY_PROJECT/prod/.github/scripts/deploy.sh"
+            prod "$DEPLOY_REPO" "$DEPLOY_TAG"
