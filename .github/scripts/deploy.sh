@@ -53,6 +53,28 @@ export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:-all}'"
 # shellcheck disable=SC2086
 docker compose pull $SERVICES
+
+# Правка ТОЛЬКО конфига/.env без смены образа сама не применяется: docker compose
+# решает пересоздавать ли контейнер по хешу СПЕКИ (образ/env/labels/определения
+# маунтов), а СОДЕРЖИМОЕ bind-mount'ов (configs/*, .env-как-файл) в него не входит —
+# новый файл доезжает, но процесс держит старый конфиг в памяти. Хешируем конфиги+env;
+# изменились с прошлого деплоя → --force-recreate (сервисы перечитают конфиг),
+# не изменились → обычный up без лишнего пересоздания.
+NEW_HASH=""
+if command -v sha256sum >/dev/null 2>&1; then
+  set +e
+  NEW_HASH="$({ find configs -type f -exec sha256sum {} + ; [ -f .env ] && sha256sum .env ; } 2>/dev/null | sort | sha256sum | awk '{print $1}')"
+  set -e
+fi
+HASH_FILE="$DIR/.deploy-config-hash"
+RECREATE=""
+if [ -n "$NEW_HASH" ] && [ "$NEW_HASH" != "$(cat "$HASH_FILE" 2>/dev/null || true)" ]; then
+  echo "configs/.env изменились с прошлого деплоя → up --force-recreate"
+  RECREATE="--force-recreate"
+fi
+
 # shellcheck disable=SC2086
-docker compose up -d --wait --wait-timeout 300 $SERVICES
+docker compose up -d --wait --wait-timeout 300 $RECREATE $SERVICES
 docker compose ps
+# хеш конфигов фиксируем только после успешного up (up упал → set -e прервёт раньше)
+[ -n "$NEW_HASH" ] && printf '%s\n' "$NEW_HASH" > "$HASH_FILE"
