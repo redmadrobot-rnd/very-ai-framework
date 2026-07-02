@@ -137,15 +137,20 @@ jobs:
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         # dev деплоим по :latest — единый тег для всего deploy-набора: и только что
         # пересобранных сервисов, и незатронутых при редеплое конфига стека.
+        # Все подстановки идут через env и пробрасываются в удалённый шелл (envs:),
+        # где раскрываются как данные — а не вклеиваются в текст script (script injection).
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_PROJECT: ${{ github.event.repository.name }}
+          DEPLOY_SERVICE: ${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_SERVICE
           script: >
-            bash /srv/deploy/${{ github.event.repository.name }}/dev/.github/scripts/deploy.sh dev ${{ github.repository }} latest
-            "${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}"
+            bash "/srv/deploy/$DEPLOY_PROJECT/dev/.github/scripts/deploy.sh"
+            dev "$DEPLOY_REPO" latest "$DEPLOY_SERVICE"
