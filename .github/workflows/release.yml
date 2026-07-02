@@ -156,8 +156,6 @@ jobs:
 
       - name: Deploy all services to prod
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
-        # Все подстановки идут через env и пробрасываются в удалённый шелл (envs:),
-        # где раскрываются как данные — а не вклеиваются в текст script (script injection).
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
