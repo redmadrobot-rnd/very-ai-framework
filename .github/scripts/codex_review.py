@@ -112,6 +112,27 @@ def delete_comment(repo: str, token: str, comment_id: int) -> None:
     gh_api("DELETE", f"/repos/{repo}/issues/comments/{comment_id}", token)
 
 
+# Инлайн-комменты этого ревьюера начинаются с эмодзи важности + `**КАТЕГОРИЯ**:`.
+INLINE_MARKER = re.compile(r"^(🔴|🟡|🟢|⚪) \*\*")
+
+
+def clear_prior_inline(repo: str, pr: str, token: str) -> None:
+    """Удалить инлайн-комменты прошлых прогонов этого ревьюера.
+
+    Ревью stateless: каждый запуск диффит заново и постит НОВЫЕ инлайны, а GitHub
+    старые не резолвит. Без чистки пофикшенные и живые находки висят вперемешку и
+    сбивают с толку. Опознаём свои комменты по маркеру важности (не трогаем людей).
+    """
+    status, comments = gh_api(
+        "GET", f"/repos/{repo}/pulls/{pr}/comments?per_page=100", token
+    )
+    if status >= 300 or not isinstance(comments, list):
+        return
+    for c in comments:
+        if INLINE_MARKER.match(c.get("body", "")):
+            gh_api("DELETE", f"/repos/{repo}/pulls/comments/{c['id']}", token)
+
+
 def run(*args: str, **kwargs) -> str:
     proc = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if proc.returncode != 0:
@@ -147,6 +168,9 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
                 lines[path].add(new_ln)
                 new_ln += 1
             elif raw.startswith(" "):
+                # context lines live inside the hunk → commentable on RIGHT too;
+                # allows anchoring findings that reference unchanged neighbouring code
+                lines[path].add(new_ln)
                 new_ln += 1
             # '-' deletions and '\\' markers don't advance the new-file counter
     return lines
@@ -162,9 +186,17 @@ def parse_codex_json(text: str) -> dict | None:
         return None
 
 
-def build_summary(verdict: str, summary: str, orphans: list[dict]) -> str:
+def build_summary(
+    verdict: str, summary: str, orphans: list[dict], inline_count: int = 0
+) -> str:
     verdict_label = "✅ LGTM" if verdict == "lgtm" else "⚠️ Needs changes"
     out = [f"🤖 **Codex review** — {verdict_label}", "", summary or ""]
+    total = inline_count + len(orphans)
+    if total:
+        out += [
+            "",
+            f"Замечаний: {total} (инлайн: {inline_count}, в сводке: {len(orphans)}).",
+        ]
     if orphans:
         out += ["", "Не удалось привязать к строке diff'а:"]
         out += [
@@ -314,7 +346,11 @@ def main() -> None:
         else:
             orphans.append(f)
 
-    summary = build_summary(verdict, parsed.get("summary", ""), orphans)
+    summary = build_summary(verdict, parsed.get("summary", ""), orphans, len(inline))
+
+    # Инлайны прошлых прогонов чистим ПЕРЕД постингом новых — иначе накапливаются
+    # (GitHub их не резолвит), и живое мешается с уже пофикшенным.
+    clear_prior_inline(repo, pr, token)
 
     # Inline-замечания по строкам — отдельным review (без них review создавать нельзя).
     # Чтобы итог жил в ОДНОМ месте, кладём вердикт+summary прямо в body ревью, а
