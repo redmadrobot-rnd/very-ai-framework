@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 #
-# Когда:   шаг discover tests-джоба, до вычисления затронутого.
-# Зачем:   найти все тест-каталоги (корень + сервисы), не завися от их числа и имён.
-# Вход:    нет (работает от корня репозитория).
-# Алгоритм:
-#   тест-каталог = папка с pyproject.toml, где есть [project] или [tool.pytest.*];
-#   берём корень (.) + по одному ближайшему в каждом services/<имя>/.
-# Выход:   JSON-массив путей тест-каталогов, напр. [".","services/auth"].
+# ЧТО ДЕЛАЕТ: ищет все каталоги, где есть тесты (корень проекта + каждый сервис). 
+#             По этому списку CI дальше решает,
+#             где запускать pytest.
+#
+# Когда:   первый шаг discover в tests-джобе.
+
+# Выход:   JSON-массив путей, напр. [".","services/auth/workdir"].
+
 set -euo pipefail
 
-# тест-каталог = pyproject с [project] или pytest-конфигом ([tool.pytest.*])
+# Папка, в которой лежат сервисы с pytests.
+SERVICES_DIR="services"
+
+# является ли этот pyproject.toml тест-каталогом (есть [project] или pytest-конфиг)
 is_test_dir() { grep -qE '^\[(project|tool\.pytest)' "$1" 2>/dev/null; }
 
-# компактный JSON-массив строк (без зависимости от jq)
+# собрать JSON-массив строк вручную
 json_array() {
   local out="" item
   for item in "$@"; do
@@ -22,7 +26,7 @@ json_array() {
   printf '[%s]' "$out"
 }
 
-# ближайший (по глубине) подходящий pyproject под каталогом → печатает его dir, иначе ничего
+# найти ближайший к корню тест-pyproject внутри каталога и напечатать его папку
 nearest_test_dir() {
   local manifest
   while IFS= read -r manifest; do
@@ -36,16 +40,17 @@ nearest_test_dir() {
 
 dirs=()
 
-# корневое окружение
+# 1) корневое окружение — если сам корень репозитория является тест-каталогом
 if [ -f pyproject.toml ] && is_test_dir pyproject.toml; then
   dirs+=(".")
 fi
 
-# по одному тест-каталогу на services/<имя>/
-if [ -d services ]; then
-  for svc in services/*/; do
+# 2) по одному тест-каталогу на каждый сервис в SERVICES_DIR
+if [ -d "$SERVICES_DIR" ]; then
+  for svc in "$SERVICES_DIR"/*/; do
     d=$(nearest_test_dir "$svc"); [ -n "$d" ] && dirs+=("$d")
   done
 fi
 
+# печатаем итоговый список
 json_array ${dirs[@]+"${dirs[@]}"}
