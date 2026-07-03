@@ -1,13 +1,14 @@
 """Codex PR reviewer — posts a live status comment, then fills it with the verdict.
 
 Flow:
-  1. immediately post a placeholder comment ("анализирую… ⏳") so it's visible the job started;
+  1. immediately post a placeholder comment ("анализирую… ⏳") so it's visible
+     the job started;
   2. compute the PR diff against the base branch;
-  3. ask `codex exec` for structured JSON findings (subscription auth on the runner);
+  3. ask `codex exec` for structured JSON findings (subscription auth on runner);
   4. keep only findings that land on a line actually present in the diff;
-  5. if there are inline findings, post ONE PR review carrying the verdict/summary in its
-     body plus the inline threads, then delete the placeholder (single surface). With no
-     inline findings, edit the placeholder into the summary instead.
+  5. if there are inline findings, post ONE PR review carrying the verdict/summary
+     in its body plus the inline threads, then delete the placeholder (single
+     surface). With no inline findings, edit the placeholder into the summary.
 
 Findings that can't be anchored to a diff line, and any parse/post failure,
 degrade into the summary comment — the job never hard-fails on review noise.
@@ -31,8 +32,8 @@ SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
 MAX_DIFF = 60000  # держит вход в пределах контекста модели
 
 # Префикс с контекстом ветки добавляется ТОЛЬКО когда worktree реально поднят
-# (codex запущен в коде PR). Иначе промпт не должен заявлять о доступности файлов —
-# иначе codex прочитает файлы default-ветки, приняв их за PR (вводящее в заблуждение ревью).
+# (codex запущен в коде PR). Иначе промпт не должен заявлять о доступности файлов
+# — иначе codex прочитает файлы default-ветки, приняв их за PR (ложное ревью).
 PR_CONTEXT_NOTE = (
     "The full PR branch is checked out in your working directory — read any files you "
     "need for context (imports, callers, type definitions, neighbouring code).\n\n"
@@ -71,7 +72,9 @@ def env(name: str) -> str:
     return val
 
 
-def gh_api(method: str, path: str, token: str, payload: dict | None = None) -> tuple[int, dict]:
+def gh_api(
+    method: str, path: str, token: str, payload: dict | None = None
+) -> tuple[int, dict]:
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(f"{API}{path}", data=data, method=method)
     req.add_header("Authorization", f"Bearer {token}")
@@ -91,13 +94,17 @@ def gh_api(method: str, path: str, token: str, payload: dict | None = None) -> t
 
 def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
     """Создать issue-коммент на PR. Возвращает его id (или None при ошибке)."""
-    status, data = gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token, {"body": body})
+    status, data = gh_api(
+        "POST", f"/repos/{repo}/issues/{pr}/comments", token, {"body": body}
+    )
     return data.get("id") if status < 300 else None
 
 
 def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
     """Перезаписать тело ранее созданного issue-коммента."""
-    gh_api("PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body})
+    gh_api(
+        "PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body}
+    )
 
 
 def delete_comment(repo: str, token: str, comment_id: int) -> None:
@@ -108,7 +115,9 @@ def delete_comment(repo: str, token: str, comment_id: int) -> None:
 def run(*args: str, **kwargs) -> str:
     proc = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if proc.returncode != 0:
-        raise RuntimeError(f"{args[0]} exited {proc.returncode}: {proc.stderr.strip()[:1000]}")
+        raise RuntimeError(
+            f"{args[0]} exited {proc.returncode}: {proc.stderr.strip()[:1000]}"
+        )
     return proc.stdout
 
 
@@ -120,7 +129,13 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
     for raw in diff.splitlines():
         if raw.startswith("+++ "):
             target = raw[4:]
-            path = None if target == "/dev/null" else target[2:] if target.startswith("b/") else target
+            path = (
+                None
+                if target == "/dev/null"
+                else target[2:]
+                if target.startswith("b/")
+                else target
+            )
             if path:
                 lines.setdefault(path, set())
             new_ln = None
@@ -153,7 +168,8 @@ def build_summary(verdict: str, summary: str, orphans: list[dict]) -> str:
     if orphans:
         out += ["", "Не удалось привязать к строке diff'а:"]
         out += [
-            f"- {SEV_EMOJI.get(f.get('severity'), '⚪')} `{f.get('path')}:{f.get('line')}` "
+            f"- {SEV_EMOJI.get(f.get('severity'), '⚪')} "
+            f"`{f.get('path')}:{f.get('line')}` "
             f"**{f.get('category', '').upper()}** — {f.get('comment', '')}"
             for f in orphans
         ]
@@ -169,11 +185,14 @@ def main() -> None:
         base = base or info["base"]["ref"]
         head_sha = head_sha or info["head"]["sha"]
 
-    # Сразу постим коммент-заглушку — сигнал, что ревью стартовало; его же обновим вердиктом.
-    progress_id = post_comment(repo, pr, token, "🤖 **Codex review** — анализирую изменения, подождите… ⏳")
+    # Сразу постим коммент-заглушку — сигнал, что ревью стартовало;
+    # его же потом обновим вердиктом.
+    progress_id = post_comment(
+        repo, pr, token, "🤖 **Codex review** — анализирую изменения, подождите… ⏳"
+    )
 
     def finalize(text: str) -> None:
-        """Финальный результат — поверх заглушки (или новым комментом, если её создать не вышло)."""
+        """Финал — поверх заглушки (или новым комментом, если её не вышло создать)."""
         if progress_id is not None:
             edit_comment(repo, token, progress_id, text)
         else:
@@ -181,12 +200,22 @@ def main() -> None:
 
     # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
     # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
-    fetch_base = subprocess.run(["git", "fetch", "origin", base], capture_output=True, text=True)
-    fetch_head = subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], capture_output=True, text=True)
+    fetch_base = subprocess.run(
+        ["git", "fetch", "origin", base], capture_output=True, text=True
+    )
+    fetch_head = subprocess.run(
+        ["git", "fetch", "origin", f"refs/pull/{pr}/head"],
+        capture_output=True,
+        text=True,
+    )
     if fetch_base.returncode or fetch_head.returncode:
-        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем, чтобы дефект был виден.
+        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем,
+        # чтобы дефект был виден.
         err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
-        finalize(f"🤖 Codex review: не смог получить изменения (git fetch упал).\n\n```\n{err}\n```")
+        finalize(
+            f"🤖 Codex review: не смог получить изменения "
+            f"(git fetch упал).\n\n```\n{err}\n```"
+        )
         sys.exit("git fetch failed")
     # Сгенерённые/шумные файлы не ревьюятся, но раздувают вход — исключаем из дифа.
     diff_pathspec = [
@@ -197,13 +226,20 @@ def main() -> None:
         ":(exclude)**/*.min.*",
         ":(exclude)**/*.snap",
     ]
-    diff = run("git", "diff", f"origin/{base}...FETCH_HEAD", "--", *diff_pathspec).strip()
+    diff = run(
+        "git", "diff", f"origin/{base}...FETCH_HEAD", "--", *diff_pathspec
+    ).strip()
     if not diff:
         finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
     if len(diff) > MAX_DIFF:
-        # строки за отсечкой теряют inline-привязку (уедут в summary), но код codex дочитает из worktree
-        diff = diff[:MAX_DIFF] + "\n\n[diff обрезан по лимиту размера; полный код ветки доступен в рабочей папке]"
+        # строки за отсечкой теряют inline-привязку (уедут в summary),
+        # но код codex дочитает из worktree
+        diff = (
+            diff[:MAX_DIFF]
+            + "\n\n[diff обрезан по лимиту размера; "
+            + "полный код ветки доступен в рабочей папке]"
+        )
 
     # codex обрабатывает недоверенный код PR. Токен ему не нужен — убираем GH_TOKEN из
     # окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
@@ -211,12 +247,19 @@ def main() -> None:
 
     # Полный код ветки PR — в отдельный detached worktree, для codex ТОЛЬКО на чтение.
     # Главный чекаут (= default branch, откуда исполняется ЭТОТ скрипт) не трогаем: на
-    # self-hosted раннере недопустимо выполнять CI-логику из присланного контрибьютором
-    # кода. Раннер персистентный — сначала чистим остаток от возможного упавшего прогона.
+    # self-hosted раннере недопустимо выполнять CI-логику из присланного
+    # контрибьютором кода. Раннер персистентный — сначала чистим остаток
+    # от возможного упавшего прогона.
     wt = "_pr_src"
-    subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True, text=True)
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", wt], capture_output=True, text=True
+    )
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
-    add = subprocess.run(["git", "worktree", "add", "--detach", wt, "FETCH_HEAD"], capture_output=True, text=True)
+    add = subprocess.run(
+        ["git", "worktree", "add", "--detach", wt, "FETCH_HEAD"],
+        capture_output=True,
+        text=True,
+    )
     pr_cwd = wt if add.returncode == 0 else None
     if pr_cwd is None:
         # worktree не встал — деградируем к старому поведению (контекст = только дифф).
@@ -231,12 +274,19 @@ def main() -> None:
         prompt = PR_CONTEXT_NOTE + prompt
     try:
         raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
-    except Exception as exc:  # noqa: BLE001 — любой сбой codex не должен оставить заглушку висеть
-        finalize(f"🤖 Codex review: не удалось выполнить codex.\n\n```\n{str(exc)[:1000]}\n```")
+    except Exception as exc:  # noqa: BLE001 — сбой codex не должен оставить заглушку
+        finalize(
+            f"🤖 Codex review: не удалось выполнить codex."
+            f"\n\n```\n{str(exc)[:1000]}\n```"
+        )
         sys.exit(f"codex exec failed: {exc}")
     finally:
         if pr_cwd:
-            subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True, text=True)
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", wt],
+                capture_output=True,
+                text=True,
+            )
 
     parsed = parse_codex_json(raw)
     if parsed is None:
@@ -256,7 +306,8 @@ def main() -> None:
                     "path": path,
                     "line": line,
                     "side": "RIGHT",
-                    "body": f"{SEV_EMOJI.get(f.get('severity'), '⚪')} **{f.get('category', '').upper()}**: "
+                    "body": f"{SEV_EMOJI.get(f.get('severity'), '⚪')} "
+                    f"**{f.get('category', '').upper()}**: "
                     f"{f.get('comment', '')}",
                 }
             )
@@ -277,20 +328,34 @@ def main() -> None:
             "event": "COMMENT",
             "comments": inline,
         }
-        review_status, _ = gh_api("POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review)
+        review_status, _ = gh_api(
+            "POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review
+        )
 
     if inline and review_status < 300:
         # итог уехал в body ревью → заглушка больше не нужна
         if progress_id is not None:
             delete_comment(repo, token, progress_id)
-        print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
+        print(
+            f"posted review: {len(inline)} inline, "
+            f"{len(orphans)} in summary, verdict={verdict}"
+        )
     elif review_status >= 300:
         # привязка inline отклонена — складываем все находки в итоговый коммент
         all_findings = orphans + [
-            {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]} for c in inline
+            {
+                "path": c["path"],
+                "line": c["line"],
+                "severity": "",
+                "category": "",
+                "comment": c["body"],
+            }
+            for c in inline
         ]
         finalize(build_summary(verdict, parsed.get("summary", ""), all_findings))
-        print(f"reviews API returned {review_status}; put everything in summary comment")
+        print(
+            f"reviews API returned {review_status}; put everything in summary comment"
+        )
     else:
         # inline-находок нет — итог только в комменте
         finalize(summary)
