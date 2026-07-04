@@ -9,9 +9,6 @@ on:
 # Только самый свежий пуш в main доводится до конца: медленный build старого
 # коммита отменяется и не может перезаписать :latest ПОЗЖЕ нового (иначе dev
 # откатился бы на старый образ). Для dev это «последний коммит побеждает».
-# Прерывание безопасно: plan диффает от маркера refs/deploy/dev (последний УСПЕШНО
-# задеплоенный коммит), а не от github.event.before. Недособранные отменённым build
-# сервисы попадут в дифф следующего пуша — не теряются.
 concurrency:
   group: deploy-dev-pipeline
   cancel-in-progress: true
@@ -34,16 +31,16 @@ jobs:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
-          # base диффа — маркер последнего УСПЕШНО задеплоенного коммита (refs/deploy/dev),
-          # иначе github.event.before. От before теряли бы сервисы недособранного
-          # отменённого build (их не было бы в диапазоне before→sha). Маркер двигается
-          # только после успешного deploy-dev, поэтому дифф самовосстанавливается.
+          # Диффим от маркера refs/deploy/dev — последнего УСПЕШНО задеплоенного
+          # коммита (двигается в конце deploy-dev), а не от github.event.before.
+          # Это делает набор пересборки идемпотентным к прерыванию: если build
+          # предыдущего пуша отменил cancel-in-progress, его недособранные сервисы
+          # снова попадут в дифф — от before они бы потерялись. Фолбэк на before —
+          # первый прогон, когда маркера ещё нет.
           git fetch --quiet origin '+refs/deploy/dev:refs/deploy/dev' 2>/dev/null || true
           base=$(git rev-parse -q --verify refs/deploy/dev 2>/dev/null || echo "$BEFORE")
-          # build — сервисы с изменённым кодом (их образы пересобираем)
           build=$(bash .github/scripts/services.sh changed "$base" "$SHA")
-          # deploy — по умолчанию те же; но правка конфига стека
-          # (docker-compose.yml / deploy.sh) → редеплой ВСЕХ (без пересборки)
+          # deploy — по умолчанию = build; правка конфига стека → редеплой ВСЕХ
           deploy="$build"
           if git rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1 \
              && git diff --name-only "$base" "$SHA" \
@@ -163,6 +160,4 @@ jobs:
             dev "$DEPLOY_REPO" latest "$DEPLOY_SERVICES"
 
       - name: Advance dev deploy marker
-        # Только после успешного деплоя. Этот коммит — база диффа для след. пуша:
-        # прерванный build больше не теряет недособранные сервисы.
         run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/dev"
