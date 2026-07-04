@@ -31,13 +31,19 @@ jobs:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
-          # build — сервисы с изменённым кодом (их образы пересобираем)
-          build=$(bash .github/scripts/services.sh changed "$BEFORE" "$SHA")
-          # deploy — по умолчанию те же; но правка конфига стека
-          # (docker-compose.yml / deploy.sh) → редеплой ВСЕХ (без пересборки)
+          # Диффим от маркера refs/deploy/dev — последнего УСПЕШНО задеплоенного
+          # коммита (двигается в конце deploy-dev), а не от github.event.before.
+          # Это делает набор пересборки идемпотентным к прерыванию: если build
+          # предыдущего пуша отменил cancel-in-progress, его недособранные сервисы
+          # снова попадут в дифф — от before они бы потерялись. Фолбэк на before —
+          # первый прогон, когда маркера ещё нет.
+          git fetch --quiet origin '+refs/deploy/dev:refs/deploy/dev' 2>/dev/null || true
+          base=$(git rev-parse -q --verify refs/deploy/dev 2>/dev/null || echo "$BEFORE")
+          build=$(bash .github/scripts/services.sh changed "$base" "$SHA")
+          # deploy — по умолчанию = build; правка конфига стека → редеплой ВСЕХ
           deploy="$build"
-          if git rev-parse -q --verify "${BEFORE}^{commit}" >/dev/null 2>&1 \
-             && git diff --name-only "$BEFORE" "$SHA" \
+          if git rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1 \
+             && git diff --name-only "$base" "$SHA" \
                 | grep -qE '^(docker-compose\.yml|\.github/scripts/deploy\.sh)$'; then
             deploy=$(bash .github/scripts/services.sh list)
           fi
@@ -96,7 +102,7 @@ jobs:
     timeout-minutes: 20
     environment: dev
     permissions:
-      contents: read
+      contents: write   # двигать маркер refs/deploy/dev после успешного деплоя
       packages: read
     concurrency:
       group: deploy-dev
@@ -152,3 +158,6 @@ jobs:
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/dev/.github/scripts/deploy.sh"
             dev "$DEPLOY_REPO" latest "$DEPLOY_SERVICES"
+
+      - name: Advance dev deploy marker
+        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/dev"
