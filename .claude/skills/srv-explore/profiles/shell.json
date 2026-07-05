@@ -1,0 +1,28 @@
+{
+  "note": "Allowlist read-команд для L3-гарда (default-deny). Разрешить ИМЯ команды недостаточно — у ряда утилит есть write/exec/exfil-флаги, они проверяются в guard.py per-command: sort -o, date -s, netstat -c, yq -i/--split-exp, curl (allowlist безопасного GET), ssh (allowlist флагов, без -o/-F/туннелей = локальное исполнение через ProxyCommand). Исключены намеренно: интерпретаторы sed/awk (пишут sed w / awk print>, исполняют sed e / awk system|getline), env (исполняет команду), DNS-резолверы dig/nslookup/host/getent и hostname (эксфильтрация через DNS / смена хоста — egress вне зоны гарда, полагаемся на L4). Чтение /dev/* и /proc/kcore блокируется (сырое устройство/бесконечный источник). docker/systemctl — verb-dispatch: только перечисленные read-подкоманды (noun-формы image/context/system/volume/network НЕ включены — у них write-подкоманды). docker exec — рекурсивная проверка вложенной команды. tail/journalctl -f, docker logs -f, docker stats без --no-stream — блок как зависание.",
+  "read_commands": [
+    "cat", "ls", "grep", "egrep", "fgrep", "head", "tail", "wc", "sort",
+    "uniq", "cut", "tr", "jq", "yq", "stat", "date", "echo", "printf",
+    "column", "nl", "tac", "comm", "diff", "df", "free", "uptime",
+    "whoami", "id", "ps", "pgrep",
+    "journalctl", "ss", "netstat", "lsof", "du", "tree", "readlink", "realpath",
+    "file", "zcat", "uname", "which", "basename", "dirname"
+  ],
+  "docker_read_subcommands": [
+    "ps", "inspect", "logs", "images", "stats", "top", "port",
+    "version", "info", "df", "history"
+  ],
+  "docker_compose_read_subcommands": [
+    "ps", "logs", "config", "top", "images", "version"
+  ],
+  "systemctl_read_subcommands": [
+    "status", "is-active", "is-enabled", "is-failed", "list-units",
+    "list-unit-files", "list-timers", "list-sockets", "list-dependencies",
+    "show", "cat", "get-default", "help"
+  ],
+  "curl_forbidden_flags": [
+    "-X", "--request", "-d", "--data", "--data-raw", "--data-binary",
+    "--data-urlencode", "-F", "--form", "-T", "--upload-file", "-o",
+    "--output", "-O", "--remote-name"
+  ]
+}

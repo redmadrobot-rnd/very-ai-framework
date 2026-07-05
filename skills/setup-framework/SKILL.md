@@ -74,14 +74,16 @@ Everything below copies from `/tmp/aifw-template` into the current (target) repo
 
 ## Step 2. Install the agent tooling (dev-flow + KB skills and commands)
 
-Skills and commands are discovered in `.claude/skills/` and `.claude/commands/`. Copy the
-framework's dogfood skills + commands in (the template keeps them under `.claude/`; this
-installer skill lives separately in the template's root `skills/` and is **not** part of the copy):
+Skills, commands and subagents are discovered in `.claude/skills/`, `.claude/commands/` and
+`.claude/agents/`. Copy the framework's dogfood skills + commands + agents in (the template keeps
+them under `.claude/`; this installer skill lives separately in the template's root `skills/` and
+is **not** part of the copy):
 
 ```bash
-mkdir -p .claude/skills .claude/commands
+mkdir -p .claude/skills .claude/commands .claude/agents
 cp -r /tmp/aifw-template/.claude/skills/* .claude/skills/
 cp /tmp/aifw-template/.claude/commands/*.md .claude/commands/
+cp /tmp/aifw-template/.claude/agents/*.md .claude/agents/    # напр. srv-explore (readonly-эксплорер + guard-хук)
 # tidy: drop any copied bytecode caches (regenerated, gitignored)
 find .claude/skills -type d -name __pycache__ -prune -exec rm -rf {} +
 ```

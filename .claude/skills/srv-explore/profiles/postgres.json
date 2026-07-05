@@ -1,0 +1,30 @@
+{
+  "name": "postgres",
+  "kind": "sql",
+  "client": "psql",
+  "note": "L1-граница = отсутствие write/DDL-грантов у роли, НЕ флаг default_transaction_read_only (USERSET-GUC, сессия снимает его сама). pg_read_all_data (PG14+) читает всё без обхода RLS. Роли НЕ давать superuser, CREATE EXTENSION, dblink/postgres_fdw — они пишут side-effect'ом даже в read-only транзакции.",
+  "readonly_recipe": [
+    "CREATE ROLE inspector LOGIN PASSWORD :'pw';",
+    "GRANT CONNECT ON DATABASE app TO inspector;",
+    "GRANT pg_read_all_data TO inspector;  -- PG14+; на PG<14: GRANT USAGE ON SCHEMA public + GRANT SELECT ON ALL TABLES IN SCHEMA public + ALTER DEFAULT PRIVILEGES ... GRANT SELECT",
+    "ALTER ROLE inspector SET statement_timeout = '15s';",
+    "-- НЕ давать: SUPERUSER, CREATEROLE, CREATEDB, CREATE EXTENSION; не подключать dblink/postgres_fdw"
+  ],
+  "secret_env": "PG_INSPECTOR_PASSWORD",
+  "allow_prefixes": ["select", "with", "explain", "show", "table", "values"],
+  "forbid_keywords": [
+    "insert", "update", "delete", "drop", "truncate", "alter", "create",
+    "grant", "revoke", "copy", "merge", "call", "do", "vacuum", "analyze",
+    "reindex", "cluster", "lock", "comment", "refresh", "prepare", "execute",
+    "into", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+    "pg_ls_logdir", "pg_ls_waldir", "lo_import", "lo_export", "pg_sleep",
+    "pg_sleep_for", "pg_sleep_until", "set", "reset", "begin", "commit",
+    "rollback", "set_config", "current_setting", "pg_terminate_backend",
+    "pg_cancel_backend", "pg_reload_conf", "pg_rotate_logfile", "pg_switch_wal",
+    "pg_switch_xlog", "pg_create_restore_point", "pg_logical_emit_message",
+    "pg_stat_reset", "pg_advisory_lock", "pg_advisory_lock_shared",
+    "pg_advisory_xact_lock", "pg_advisory_xact_lock_shared", "dblink",
+    "dblink_exec", "setval", "nextval"
+  ],
+  "limits": { "statement_timeout": "15s", "default_limit": 1000 }
+}
