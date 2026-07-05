@@ -113,7 +113,18 @@ def load_json(name: str) -> dict:
 
 
 def has_follow(argv: list[str]) -> bool:
-    return any(a in FOLLOW_FLAGS for a in argv)
+    return any(a in FOLLOW_FLAGS or a.startswith("--follow=") for a in argv)
+
+
+def tail_follows(argv: list[str]) -> bool:
+    """tail: -f, -F (= -f --retry), --follow, --follow=name, и комбинированные
+    короткие вроде -fn10. Любой стример повесит агента."""
+    for a in argv:
+        if a in ("-f", "-F", "--follow") or a.startswith("--follow="):
+            return True
+        if a.startswith("-") and not a.startswith("--") and "f" in a[1:]:
+            return True
+    return False
 
 
 def forbidden_path(tok: str) -> bool:
@@ -355,9 +366,11 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         return check_systemctl(argv, shell)
     if name == "ssh":
         return check_ssh(argv, shell, depth)
-    if name in ("tail", "journalctl") and has_follow(argv[1:]):
-        return False, f"{name} -f/--follow повесит агента; используй ограниченный вывод (--tail/-n/--since)"
+    if name == "tail" and tail_follows(argv[1:]):
+        return False, "tail -f/-F/--follow повесит агента; используй -n/--lines"
     if name == "journalctl":
+        if has_follow(argv[1:]):
+            return False, "journalctl -f/--follow повесит агента; используй --since/-n"
         vac = {"--vacuum-time", "--vacuum-size", "--vacuum-files", "--rotate",
                "--flush", "--sync", "--relinquish-var", "--update-catalog", "--setup-keys"}
         if any(a.split("=", 1)[0] in vac for a in argv[1:]):
@@ -370,6 +383,23 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         return False, "date -s/--set меняет системные часы — запрещено"
     if name == "sort" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in argv[1:]):
         return False, "sort -o/--output пишет в файл — запрещено"
+    if name == "tree" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in argv[1:]):
+        return False, "tree -o пишет вывод в файл — запрещено"
+    if name == "uniq":
+        value_flags = {"-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"}
+        pos, i = [], 1
+        while i < len(argv):
+            a = argv[i]
+            if a in value_flags:
+                i += 2
+                continue
+            if a.startswith("-"):
+                i += 1
+                continue
+            pos.append(a)
+            i += 1
+        if len(pos) >= 2:
+            return False, "uniq c двумя файловыми аргументами пишет во второй файл — запрещено"
     if name == "find":
         write_actions = ("-delete", "-exec", "-execdir", "-ok", "-okdir",
                          "-fprint", "-fprint0", "-fprintf", "-fls")

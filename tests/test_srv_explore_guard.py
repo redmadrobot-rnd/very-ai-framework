@@ -76,6 +76,9 @@ ALLOW = [
     'curl -m 5 -H "Accept: application/json" https://api.example.com/v1/status',
     "ssh -p 2222 -i /home/app/key user@host cat /var/log/app.log",
     "cat /dev/null",
+    "uniq -c app.log",
+    "journalctl -F _SYSTEMD_UNIT",
+    "tree -L 2 /app",
 ]
 
 DENY = [
@@ -160,6 +163,13 @@ DENY = [
     "journalctl --rotate",
     "find /tmp -fprint0 /tmp/out",
     "find /tmp -ok cat {} +",
+    # второй проход Codex-ревью
+    "tree -o /home/app/.ssh/authorized_keys /etc",
+    "docker logs --follow=true web",
+    "tail --follow=name /var/log/x",
+    "tail -F /var/log/x",
+    "uniq access.log /etc/cron.d/evil",
+    "docker compose logs --follow=true",
 ]
 
 
