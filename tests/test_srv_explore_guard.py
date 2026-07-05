@@ -153,6 +153,13 @@ DENY = [
     'psql -c "SELECT pg_stat_reset()"',
     "psql -c \"SELECT pg_stat_file('/etc/passwd')\"",
     "psql -c \"SELECT pg_logical_emit_message(true,'x','y')\"",
+    # обходы, найденные Codex-ревью (PR #45)
+    'psql -c "UPDATE users SET admin=true" -c "SELECT 1"',
+    "ss -K",
+    "journalctl --vacuum-time=1s",
+    "journalctl --rotate",
+    "find /tmp -fprint0 /tmp/out",
+    "find /tmp -ok cat {} +",
 ]
 
 

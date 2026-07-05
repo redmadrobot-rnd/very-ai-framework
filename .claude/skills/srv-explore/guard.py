@@ -180,15 +180,18 @@ def check_db_client(argv: list[str]) -> tuple[bool, str]:
         return False, f"нет SQL-профиля для клиента {client}"
     if "-f" in argv or "--file" in argv:
         return False, "-f/--file (SQL из файла) не проверяется гардом — запрещено"
-    sql = None
+    cmds = []
     for i, a in enumerate(argv):
         if a in ("-c", "--command") and i + 1 < len(argv):
-            sql = argv[i + 1]
+            cmds.append(argv[i + 1])
         elif a.startswith("--command="):
-            sql = a.split("=", 1)[1]
-    if sql is None:
+            cmds.append(a.split("=", 1)[1])
+    if not cmds:
         return False, 'интерактивный режим клиента БД запрещён — используй -c "SELECT …"'
-    return sql_read_guard(sql, prof)
+    if len(cmds) > 1:
+        # psql исполняет КАЖДЫЙ -c по порядку — проверить только последний нельзя
+        return False, "несколько -c/--command запрещено (одна инструкция на запрос)"
+    return sql_read_guard(cmds[0], prof)
 
 
 # --- curl (allowlist безопасного GET) ----------------------------------------
@@ -354,6 +357,13 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         return check_ssh(argv, shell, depth)
     if name in ("tail", "journalctl") and has_follow(argv[1:]):
         return False, f"{name} -f/--follow повесит агента; используй ограниченный вывод (--tail/-n/--since)"
+    if name == "journalctl":
+        vac = {"--vacuum-time", "--vacuum-size", "--vacuum-files", "--rotate",
+               "--flush", "--sync", "--relinquish-var", "--update-catalog", "--setup-keys"}
+        if any(a.split("=", 1)[0] in vac for a in argv[1:]):
+            return False, "journalctl --vacuum/--rotate/--flush меняет журнал — запрещено"
+    if name == "ss" and any(a in ("-K", "--kill") for a in argv[1:]):
+        return False, "ss -K/--kill закрывает сокеты — запрещено"
     if name == "netstat" and any(a in ("-c", "--continuous") for a in argv[1:]):
         return False, "netstat -c/--continuous стримит бесконечно; убери флаг"
     if name == "date" and any(a in ("-s", "--set") or a.startswith("--set=") for a in argv[1:]):
@@ -361,8 +371,10 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     if name == "sort" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in argv[1:]):
         return False, "sort -o/--output пишет в файл — запрещено"
     if name == "find":
-        if any(a in ("-delete", "-exec", "-execdir", "-fprint", "-fprintf", "-fls") for a in argv):
-            return False, "find с -delete/-exec* запрещён"
+        write_actions = ("-delete", "-exec", "-execdir", "-ok", "-okdir",
+                         "-fprint", "-fprint0", "-fprintf", "-fls")
+        if any(a in write_actions for a in argv):
+            return False, "find с -delete/-exec*/-ok*/-fprint* запрещён"
         return True, "find (read)"
     if name == "yq":
         bad = {"-i", "--inplace", "--in-place", "-s", "--split-exp"}
