@@ -13,6 +13,9 @@ concurrency:
   group: deploy-dev-pipeline
   cancel-in-progress: true
 
+env:
+  SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
+
 jobs:
   plan:
     # build — что пересобирать; deploy — что выкатывать (может быть шире build)
@@ -82,7 +85,7 @@ jobs:
       - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          context: services/${{ matrix.service }}
+          context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
           push: true
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}

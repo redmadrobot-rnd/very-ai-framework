@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Когда:   шаг deploy в deploy-dev.yml / manual.yml — исполняется по SSH на хосте окружения.
-# Зачем:   выкатить сервисы окружения из GHCR-образов; без project-specific значений.
+# ЧТО ДЕЛАЕТ: выкатывает сервисы окружения из GHCR-образов на хосте (docker login → pull → up -d).
+#             Без project-specific значений — проект берётся из имени репозитория.
 # Вход:    $1 = env (dev/prod/…); $2 = owner/repo (префикс GHCR, имя репо = проект);
 #          $3 = tag образа; $4 = (опц.) сервисы через запятую/пробел, пусто/"all" = все.
 #          GHCR-креды — из env: GHCR_USER, GHCR_TOKEN.

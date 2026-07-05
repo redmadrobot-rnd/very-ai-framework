@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# Когда:   джобы, которым нужен набор сервисов — deploy-dev.yml (changed),
-#          manual-deploy.yml (select), release.yml (list).
-# Зачем:   обнаружить сервисы без хардкода имён. Сервис = каталог под services/.
+# ЧТО ДЕЛАЕТ: перечисляет сервисы проекта (сервис = каталог под services/) — без хардкода имён —
+#             в одном из режимов: list / changed / select.
 # Вход:    $1 = режим list | changed | select;
 #          changed: $2 = base ref, $3 = head ref (дифф между ними);
 #          select:  $2 = 'all' либо список сервисов через запятую.
@@ -13,9 +12,12 @@
 # Выход:   JSON-массив имён сервисов в stdout.
 set -euo pipefail
 
+# Папка сервисов. Дефолт services; переопределяется env SERVICES_DIR (в CI — из vars.SERVICES_DIR).
+SERVICES_DIR="${SERVICES_DIR:-services}"
+
 # имена всех сервисов (каталоги services/*), по одному на строку
 all_services() {
-  for d in services/*/; do
+  for d in "$SERVICES_DIR"/*/; do
     [ -d "$d" ] && basename "$d"
   done
   return 0   # пустой глоб → последний [ -d ] = 1; под pipefail это роняло list/select
@@ -41,7 +43,10 @@ changed_services() {
       base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
     fi
   fi
-  changed=$(git diff --name-only "$base" "$head" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
+  # имя сервиса = сегмент сразу после SERVICES_DIR/ (путь может быть вложенным, напр. apps/services)
+  changed=$(git diff --name-only "$base" "$head" \
+    | awk -v pfx="$SERVICES_DIR/" 'index($0,pfx)==1 {r=substr($0,length(pfx)+1); n=index(r,"/"); if(n>1) print substr(r,1,n-1)}' \
+    | sort -u)
   comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | json_array
 }
 
