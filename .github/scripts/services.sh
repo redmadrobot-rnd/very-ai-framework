@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# Когда:   джобы, которым нужен набор сервисов — deploy-dev.yml (changed),
-#          manual-deploy.yml (select), release.yml (list).
-# Зачем:   обнаружить сервисы без хардкода имён. Сервис = каталог под services/.
+# ЧТО ДЕЛАЕТ: перечисляет сервисы проекта (сервис = каталог под services/) — без хардкода имён —
+#             в одном из режимов: list / changed / select.
 # Вход:    $1 = режим list | changed | select;
 #          changed: $2 = base ref, $3 = head ref (дифф между ними);
 #          select:  $2 = 'all' либо список сервисов через запятую.
