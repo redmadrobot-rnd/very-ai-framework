@@ -12,9 +12,12 @@
 # Выход:   JSON-массив имён сервисов в stdout.
 set -euo pipefail
 
+# Папка, в которой лежат сервисы. Поменялась раскладка репозитория — правим здесь.
+SERVICES_DIR="services"
+
 # имена всех сервисов (каталоги services/*), по одному на строку
 all_services() {
-  for d in services/*/; do
+  for d in "$SERVICES_DIR"/*/; do
     [ -d "$d" ] && basename "$d"
   done
   return 0   # пустой глоб → последний [ -d ] = 1; под pipefail это роняло list/select
@@ -40,7 +43,7 @@ changed_services() {
       base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
     fi
   fi
-  changed=$(git diff --name-only "$base" "$head" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
+  changed=$(git diff --name-only "$base" "$head" | awk -F/ -v sd="$SERVICES_DIR" '$1==sd && NF>1 {print $2}' | sort -u)
   comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | json_array
 }
 
