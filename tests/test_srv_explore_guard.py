@@ -170,6 +170,12 @@ DENY = [
     "tail -F /var/log/x",
     "uniq access.log /etc/cron.d/evil",
     "docker compose logs --follow=true",
+    # третий проход Codex-ревью
+    'psql --file=/tmp/mutate.sql -c "SELECT 1"',
+    "psql -f/tmp/mutate.sql",
+    "docker logs -ft web",
+    "journalctl -fu nginx",
+    "docker compose logs -ft",
 ]
 
 

@@ -113,7 +113,13 @@ def load_json(name: str) -> dict:
 
 
 def has_follow(argv: list[str]) -> bool:
-    return any(a in FOLLOW_FLAGS or a.startswith("--follow=") for a in argv)
+    for a in argv:
+        if a in FOLLOW_FLAGS or a.startswith("--follow="):
+            return True
+        # слитные короткие: docker logs -ft, journalctl -fu (-F в journalctl = field, не follow)
+        if a.startswith("-") and not a.startswith("--") and "f" in a[1:]:
+            return True
+    return False
 
 
 def tail_follows(argv: list[str]) -> bool:
@@ -189,14 +195,24 @@ def check_db_client(argv: list[str]) -> tuple[bool, str]:
     prof = find_sql_profile(client)
     if not prof:
         return False, f"нет SQL-профиля для клиента {client}"
-    if "-f" in argv or "--file" in argv:
-        return False, "-f/--file (SQL из файла) не проверяется гардом — запрещено"
     cmds = []
-    for i, a in enumerate(argv):
-        if a in ("-c", "--command") and i + 1 < len(argv):
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        # SQL из файла (все формы: -f x, --file x, --file=x, слитная -f/path) — не проверяется гардом
+        if a in ("-f", "--file") or a.startswith("--file=") or (a.startswith("-f") and len(a) > 2):
+            return False, "-f/--file (SQL из файла) не проверяется гардом — запрещено"
+        if a in ("-c", "--command"):
+            if i + 1 >= len(argv):
+                return False, "-c/--command без аргумента"
             cmds.append(argv[i + 1])
-        elif a.startswith("--command="):
+            i += 2
+            continue
+        if a.startswith("--command="):
             cmds.append(a.split("=", 1)[1])
+        elif a.startswith("-c") and len(a) > 2:  # слитная форма -cSELECT…
+            cmds.append(a[2:])
+        i += 1
     if not cmds:
         return False, 'интерактивный режим клиента БД запрещён — используй -c "SELECT …"'
     if len(cmds) > 1:

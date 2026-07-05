@@ -14,7 +14,7 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: "python .claude/skills/srv-explore/guard.py"
+          command: '"$(command -v python3 || command -v python)" .claude/skills/srv-explore/guard.py'
 ---
 
 Ты — srv-explore, безопасный эксплорер сервера. Твоя работа — разобраться в
