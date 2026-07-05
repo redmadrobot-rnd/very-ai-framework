@@ -12,8 +12,8 @@
 # Выход:   JSON-массив имён сервисов в stdout.
 set -euo pipefail
 
-# Папка, в которой лежат сервисы. Поменялась раскладка репозитория — правим здесь.
-SERVICES_DIR="services"
+# Папка сервисов. Дефолт services; переопределяется env SERVICES_DIR (в CI — из vars.SERVICES_DIR).
+SERVICES_DIR="${SERVICES_DIR:-services}"
 
 # имена всех сервисов (каталоги services/*), по одному на строку
 all_services() {

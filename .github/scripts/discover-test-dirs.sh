@@ -9,8 +9,8 @@
 # Выход:   JSON-массив путей тест-каталогов, напр. [".","services/auth"].
 set -euo pipefail
 
-# Папка, в которой лежат сервисы с pytests.
-SERVICES_DIR="services"
+# Папка сервисов. Дефолт services; переопределяется env SERVICES_DIR (в CI — из vars.SERVICES_DIR).
+SERVICES_DIR="${SERVICES_DIR:-services}"
 
 # является ли этот pyproject.toml тест-каталогом (есть [project] или pytest-конфиг)
 is_test_dir() { grep -qE '^\[(project|tool\.pytest)' "$1" 2>/dev/null; }

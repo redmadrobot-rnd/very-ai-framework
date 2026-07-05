@@ -19,8 +19,8 @@ set -euo pipefail
 all_json="$1"
 default="${2:-main}"
 
-# Папка, в которой лежат сервисы. Поменялась раскладка репозитория — правим здесь.
-SERVICES_DIR="services"
+# Папка сервисов. Дефолт services; переопределяется env SERVICES_DIR (в CI — из vars.SERVICES_DIR).
+SERVICES_DIR="${SERVICES_DIR:-services}"
 
 # файлы, которые не влияют на тесты — их правки игнорируем
 IGNORE_GLOBS=(

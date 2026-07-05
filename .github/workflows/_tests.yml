@@ -15,6 +15,9 @@ on:
         type: string
         default: '3.12'
 
+env:
+  SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
+
 jobs:
   discover:
     runs-on: ubuntu-latest

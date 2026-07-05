@@ -10,6 +10,9 @@ on:
     tags:
       - "v*"
 
+env:
+  SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -56,9 +59,9 @@ jobs:
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           map='{}'
           for svc in $(printf '%s' "$SERVICES" | jq -r '.[]'); do
-            svc_sha=$(git log --first-parent -1 --format=%H -- "services/$svc/")
+            svc_sha=$(git log --first-parent -1 --format=%H -- "$SERVICES_DIR/$svc/")
             if [ -z "$svc_sha" ]; then
-              echo "::error::не найден коммит main, менявший services/$svc/ — сервис не под first-parent-историей?"
+              echo "::error::не найден коммит main, менявший $SERVICES_DIR/$svc/ — сервис не под first-parent-историей?"
               exit 1
             fi
             ref="$PREFIX/$svc:$svc_sha"
