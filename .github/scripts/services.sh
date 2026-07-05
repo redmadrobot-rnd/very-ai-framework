@@ -43,7 +43,10 @@ changed_services() {
       base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
     fi
   fi
-  changed=$(git diff --name-only "$base" "$head" | awk -F/ -v sd="$SERVICES_DIR" '$1==sd && NF>1 {print $2}' | sort -u)
+  # имя сервиса = сегмент сразу после SERVICES_DIR/ (путь может быть вложенным, напр. apps/services)
+  changed=$(git diff --name-only "$base" "$head" \
+    | awk -v pfx="$SERVICES_DIR/" 'index($0,pfx)==1 {r=substr($0,length(pfx)+1); n=index(r,"/"); if(n>1) print substr(r,1,n-1)}' \
+    | sort -u)
   comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | json_array
 }
 
