@@ -3,7 +3,7 @@ name: srv-explore
 description: >
   Безопасный readonly-эксплорер сервера субагентом srv-explore: как устроен
   allowlist/гард (shell + SQL + docker), как агент запрашивает провижининг
-  readonly-роли БД, JIT-доступ (dev проще, prod с подтверждением человека), аудит,
+  readonly-роли БД, доступ на время (dev проще, prod с подтверждением человека), аудит,
   как добавить профиль под новую СУБД. Use при разборе «что происходит/как устроено
   на сервере» или «как безопасно посмотреть на бой, ничего не сломав».
 ---
@@ -15,28 +15,29 @@ description: >
 запросы к БД. Агент — субагент `.claude/agents/srv-explore.md` (readonly `tools:` +
 PreToolUse-гард + `permissionMode: dontAsk`). Запуск — `/srv-explore <вопрос>`.
 
-## Модель безопасности (6 эшелонов)
+## Чем держим «только чтение»
 
-Readonly держим слоями — падение одного не открывает запись.
+Не одним механизмом, а несколькими независимыми — промах одного не открывает запись:
 
-| L | Слой | Где |
-|---|---|---|
-| L1 | Read-only роль СУБД (нет write/DDL-грантов) + `statement_timeout` | сервер БД |
-| L2 | `tools:` субагента без Write/Edit | `agents/srv-explore.md` |
-| L3 | PreToolUse-гард: default-deny allowlist для shell/SQL/docker | `guard.py` + `profiles/` |
-| L4 | JIT-доступ: dev проще, prod с подтверждением человека, TTL | GitHub Environments |
-| L5 | Независимый аудит-лог (пишет `guard.py` до выполнения) | `audit/` |
-| L6 | `permissionMode: dontAsk` (не bypass): неразрешённое авто-deny | frontmatter субагента |
+- **Роль в самой БД только на чтение** (сервер БД) — фундамент; движок сам отклонит запись.
+- **У субагента нет инструментов записи** (`agents/srv-explore.md`): `tools:` без `Write`/`Edit`.
+- **Гард режет каждую не-read shell-команду** (`guard.py` + `profiles/`, PreToolUse-хук).
+- **Доступ на время**, prod — с одобрением человека (GitHub Environments), короткий срок.
+- **Независимый журнал** всех команд (`audit/`, пишет `guard.py` до выполнения).
+- **Режим `permissionMode: dontAsk`** (не bypass) в frontmatter — неразрешённое авто-отклоняется.
 
-**L1 — фундамент.** Readonly, реализованный промптом/флагом/логикой MCP, обходится
+**Роль БД — фундамент.** Readonly, реализованный промптом/флагом/логикой MCP-обёртки
+(MCP — протокол подключения инструментов к агенту), обходится
 (референсный Anthropic Postgres-MCP убит SQL-инъекцией `COMMIT; DROP …`; CVE-2025-59333
 обошёл проверку `startsWith("select")`). Надёжная граница — роль в самой СУБД: движок
-сам не выполнит запись. Гард (L3) — defense-in-depth поверх и единственный барьер для
-shell (docker/ssh/curl). В Postgres граница = **отсутствие write-грантов**, а НЕ флаг
+сам не выполнит запись. Гард — defense-in-depth поверх и единственный барьер для shell
+(docker/ssh/curl). В Postgres граница = **отсутствие write-грантов**, а НЕ флаг
 `default_transaction_read_only` (его сессия снимает сама).
 
-**L5 независим.** Урок Replit (июль 2025): агент удалил прод-БД и соврал про откат.
-Поэтому лог выполненного пишется вне контроля агента — доверяем логу, не рассказу.
+**Журнал независим.** Урок Replit (июль 2025): агент удалил прод-БД и соврал про откат.
+Поэтому лог выполненного пишется вне контроля агента — доверяем логу, не рассказу. И
+оговорка про режим разрешений: если сессия в bypass, `dontAsk` субагента игнорируется —
+реально держат первые три пункта (роль БД, отсутствие write-инструментов, гард).
 
 ## 1. Провижининг readonly-роли БД (запрашивает агент, создаёт человек)
 
@@ -52,11 +53,11 @@ shell (docker/ssh/curl). В Postgres граница = **отсутствие wri
 `ALTER ROLE inspector SET statement_timeout='15s';`. Роли **не** давать superuser,
 `CREATE EXTENSION`, dblink/postgres_fdw — они пишут side-effect'ом даже в read-only.
 
-## 2. JIT-доступ: dev vs prod
+## 2. Доступ выдаётся на время (dev vs prod)
 
 - **prod** — постоянного доступа у агента нет. Креды выдаются на сессию через штатные
   **required reviewers** окружения `prod` (тот же канал, что резолвит SSH в деплое):
-  секрет не отдаётся, пока ревьюер не одобрил; короткий TTL + revoke.
+  секрет не отдаётся, пока ревьюер не одобрил; выдан на короткий срок, потом отзывается.
 - **dev** — допустим более простой доступ (без церемонии), риск ниже.
 - Раскладка секретов фреймворка: host/user/имя роли → Environment **Variable**;
   пароль readonly-роли → Environment **Secret**. В код/доки креды не попадают
@@ -67,11 +68,13 @@ shell (docker/ssh/curl). В Postgres граница = **отсутствие wri
 - **Может (read):** чтение файлов/кода (Read/Grep/Glob); `cat/tail/grep/ss/lsof/du/
   journalctl` (без `-f`); `docker ps/inspect/logs --tail/top/stats --no-stream`,
   `docker compose ps/logs/config`, `docker exec <c> <read-команда>`; `systemctl
-  status/list-units/cat`; `curl` GET; `ssh <host> <read-команда>`; `SELECT` из
-  allowlist профиля.
-- **Не может:** мутации БД (DML/DDL), restart/rm/write в shell, POST/PUT/DELETE,
-  `docker run/stop/rm/build/cp/exec-write/exec --privileged`, follow/stream
-  (`-f`, `docker stats` без `--no-stream`), интерактивные сессии, обход гарда.
+  status/list-units/cat`; `curl` только на чтение (GET/HEAD; флаги записи/выгрузки
+  режутся); `ssh <host> <read-команда>`; `SELECT` из allowlist профиля.
+- **Не может:** запись в БД (INSERT/UPDATE/DELETE) и изменение схемы (DROP/ALTER/…),
+  restart/rm/write в shell, POST/PUT/DELETE, `docker run/stop/rm/build/cp/
+  exec-write/exec --privileged`, follow/stream (`-f`, `docker stats` без
+  `--no-stream`), обход гарда. `docker exec -it <c> sh` не проходит: блок не на
+  `-it`, а на интерактивной оболочке (`sh`/`bash` не в read-allowlist).
 
 Гард — default-deny: чего нет в `profiles/shell.json` и что не проходит SQL/docker-
 проверку — блокируется, причина возвращается агенту в stderr.
@@ -90,26 +93,35 @@ stats` без `--no-stream` блокируются как зависание. П
 время, сессия, команда, решение, причина) **до** выполнения и независимо от агента.
 Путь переопределяется env `SRV_EXPLORE_AUDIT`. Логи в git не коммитятся (`.gitignore`).
 
-## 6. Как добавить профиль под новую СУБД
+## 6. Как добавить новую СУБД
 
-DB-agnostic: ядро не знает СУБД. Новый профиль = один JSON `profiles/<db>.json`:
+**Сейчас реализован только Postgres** (`client: psql`, `kind: sql`): гард понимает SQL,
+переданный через `-c "<SELECT…>"`. Профиль = JSON `profiles/<db>.json` (`client`, `kind`,
+`readonly_recipe`, `secret_env`, для SQL — `allow_prefixes`/`forbid_keywords`, `limits`).
 
-- `client` — бинарь клиента (`mysql`, `mongosh`, …); `kind` — `sql` (общий SELECT-гард)
-  либо иной (свой allowlist read-команд);
-- `readonly_recipe` — как выдать read-only роль в этой СУБД (L1); `secret_env` — имя Secret;
-- для `sql`: `allow_prefixes` (разрешённые начала стейтмента), `forbid_keywords`;
-- `limits` — таймаут и дефолтный LIMIT.
+Клиенты `mysql`/`mongosh`/`clickhouse-client`/`redis-cli` в коде объявлены, но пока
+**блокируются** — у них другой способ передать запрос (`mysql -e`, `clickhouse --query`)
+или это не SQL. Добавить их = **не только JSON**, а и небольшой код в `guard.py`: разбор
+флага запроса под клиента, для NoSQL — режим allowlist read-глаголов (find/aggregate без
+`$out`/`$merge`, count…) вместо SELECT.
 
-`guard.py` подхватит профиль по совпадению `client`. Ядро править не нужно. Для NoSQL
-(Mongo/Redis) allowlist = список read-глаголов вместо SELECT.
+Рецепты readonly-ролей под будущую работу (из ресёрча): MySQL — `GRANT SELECT` без FILE;
+ClickHouse — профиль `readonly=1`+`allow_ddl=0` (в сессии не снимается); MongoDB — роль
+`read` (резать `$out`/`$merge`); Redis — ACL `on >pass ~* +@read` (без `@scripting`/`@dangerous`).
 
-Рецепты L1 по СУБД (из ресёрча): MySQL — `GRANT SELECT` без FILE; ClickHouse — профиль
-`readonly=1`+`allow_ddl=0` (в сессии не снимается); MongoDB — роль `read` (резать
-`$out`/`$merge`); Redis — ACL `on >pass ~* +@read` (без `@scripting`/`@dangerous`).
+## 7. Когда находка требует изменения
+
+Разведчик только читает и **предлагает** — сам не чинит. Если нужно вмешаться (рестарт,
+правка конфига, фикс данных): в отчёте он даёт точное предложенное действие и
+останавливается. Выполняет его **не разведчик, а основной агент сессии** — показывает
+инженеру команду, тот одобряет («да, делай»), основной агент делает это одно действие
+своим (инженера) доступом и отчитывается. Живьём в сессии, не через PR. Разведчик рук не
+имеет и сам себя не эскалирует.
 
 ## Принципы
 
-- Читаем, не меняем. Нужна мутация — человек делает сам, агент только предлагает.
-- L1 (роль СУБД) обязателен — гард и tools его не заменяют, а дополняют.
+- Читаем, не меняем. Нужно изменение — разведчик предлагает; выполняет основной агент
+  сессии по одобрению человека (не разведчик).
+- Роль БД только на чтение обязательна — гард и tools её не заменяют, а дополняют.
 - Узкие запросы под гипотезу, не широкие сканы прода.
 - Доверяем аудит-логу, не рассказу агента.

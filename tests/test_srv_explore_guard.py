@@ -1,6 +1,6 @@
-"""Контрактные тесты L3-гарда srv-explore.
+"""Контрактные тесты гарда srv-explore.
 
-Гоняют guard.py ровно так, как его зовёт харнесс: PreToolUse-JSON на stdin,
+Гоняют guard.py ровно так, как его зовёт рантайм Claude Code: PreToolUse-JSON на stdin,
 проверяется exit-код (0 = allow, 2 = deny) и permissionDecision в stdout.
 allow-кейсы — то, что эксплореру нужно уметь; deny-кейсы включают оба реальных
 обхода readonly-MCP (Datadog COMMIT-инъекция, CVE-2025-59333) и docker-escape'ы.

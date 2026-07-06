@@ -2,7 +2,7 @@
   "name": "postgres",
   "kind": "sql",
   "client": "psql",
-  "note": "L1-граница = отсутствие write/DDL-грантов у роли, НЕ флаг default_transaction_read_only (USERSET-GUC, сессия снимает его сама). pg_read_all_data (PG14+) читает всё без обхода RLS. Роли НЕ давать superuser, CREATE EXTENSION, dblink/postgres_fdw — они пишут side-effect'ом даже в read-only транзакции.",
+  "note": "Граница readonly = отсутствие write/DDL-грантов у роли, НЕ флаг default_transaction_read_only (USERSET-GUC, сессия снимает его сама). pg_read_all_data (PG14+) читает всё без обхода RLS. Роли НЕ давать superuser, CREATE EXTENSION, dblink/postgres_fdw — они пишут side-effect'ом даже в read-only транзакции.",
   "readonly_recipe": [
     "CREATE ROLE inspector LOGIN PASSWORD :'pw';",
     "GRANT CONNECT ON DATABASE app TO inspector;",
