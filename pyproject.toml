@@ -1,7 +1,7 @@
 [tool.ruff]
 # Вендоренный CLI фреймворка (gitmark) — это инструмент, а не исходники проекта;
 # не гоняем по нему линтер в адаптирующемся репо.
-extend-exclude = [".claude/skills"]
+extend-exclude = [".claude/skills", ".codex/skills"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

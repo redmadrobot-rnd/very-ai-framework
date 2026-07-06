@@ -22,7 +22,7 @@ jobs:
       - name: KB lint (онтология базы знаний)
         run: |
           if [ -d docs/gitmark ]; then
-            python .claude/skills/kb-search/gitmark.py lint --strict
+            bash .github/scripts/gitmark.sh lint --strict
           else
             echo "::notice::нет docs/gitmark — KB lint пропущен"
           fi

@@ -4,7 +4,8 @@
 Один прогон — от часа до дня. Работа в изолированном worktree, дизайн = markdown,
 в прод уходит только зелёное.
 
-Этапы (полностью — в скилле [`.claude/skills/dev-flow/SKILL.md`](.claude/skills/dev-flow/SKILL.md)):
+Этапы (полностью — в скилле `dev-flow`: для Codex он ставится в `.codex/skills/`,
+для Claude Code исходник лежит в [`.claude/skills/dev-flow/SKILL.md`](.claude/skills/dev-flow/SKILL.md)):
 
 1. **Worktree** — вход в пайп: вся работа уходит в изолированный worktree, `main` не трогаем.
 2. **Proposal** — вход от пользователя; агент не кодит, пока не считал скоуп и DoD.
@@ -18,9 +19,10 @@
 
 ## Связанные части
 
-- **Нарезка задач** — скилл [`task-breakdown`](.claude/skills/task-breakdown/SKILL.md):
+- **Нарезка задач** — скилл `task-breakdown`:
   шов между проектированием и имплементацией, задачи «агентом для агентов» с DoD и проверками.
-- **Правила разработки** (ветки, pre-commit, тесты, секреты) — в [`CLAUDE.md`](CLAUDE.md).
+- **Правила разработки** (ветки, pre-commit, тесты, секреты) — в [`AGENTS.md`](AGENTS.md)
+  для Codex и в [`CLAUDE.md`](CLAUDE.md) для Claude Code.
 - **CI/CD-хвост** процесса (этапы 7–8) — в [CICD.md](CICD.md).
 - **База знаний**, в которую агент ходит на ресёрче и которую обновляет, — в
   [KNOWLEDGE-BASE.md](KNOWLEDGE-BASE.md).

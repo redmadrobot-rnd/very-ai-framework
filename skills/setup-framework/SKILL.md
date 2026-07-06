@@ -1,7 +1,7 @@
 ---
 name: setup-framework
 description: >
-  Roll out the whole very-ai-framework (dev-flow process + GitMark knowledge base + CI/CD) 
+  Roll out the whole very-ai-framework (dev-flow process + GitMark knowledge base + CI/CD)
   from the template repo into a target project: copy skills/commands into .claude/,
   scaffold the KB, port the GitHub Actions pipeline, and configure environments / secrets /
   deploy. Use to set up the framework in a new or different repository.
@@ -17,7 +17,7 @@ repository**. The framework is three nested parts, and this skill installs all o
   commands, the `gitmark` CLI, and a `docs/gitmark/` KB scaffold.
 - **CI/CD** — GitHub Actions workflows + scripts, pre-commit, and the environments / secrets / deploy setup.
 
-- **Template (source of files):** `https://github.com/virrius/very-ai-framework`
+- **Template (source of files):** `https://github.com/redmadrobot-rnd/very-ai-framework`
 - **Target repository:** the project you're currently in.
 
 CI/CD contract: each service is a `services/<name>/` directory with its own `Dockerfile`; service
@@ -66,7 +66,7 @@ If any of this is missing — **ask directly**, don't substitute values yourself
 From the root of the **target** repository:
 
 ```bash
-TEMPLATE=https://github.com/virrius/very-ai-framework   # or the provided URL
+TEMPLATE=https://github.com/redmadrobot-rnd/very-ai-framework   # or the provided URL
 git clone --depth 1 "$TEMPLATE" /tmp/aifw-template
 ```
 
@@ -91,7 +91,7 @@ package). The commands call it by the stable path `.claude/skills/kb-search/gitm
 path patching is needed — it works because the whole `.claude/` tree is copied as-is.
 
 **Alternative — plugin install** (when the template repo is public, or you have SSH set up and a
-`.claude-plugin/` manifest): `claude plugin marketplace add virrius/very-ai-framework` then
+`.claude-plugin/` manifest): `claude plugin marketplace add redmadrobot-rnd/very-ai-framework` then
 `claude plugin install`. For a **private** template repo this is currently unreliable (SSH-only,
 Windows bugs) — prefer the copy above.
 
@@ -113,7 +113,7 @@ file the target uses, **without binding to the name**:
 
 ```bash
 mkdir -p docs/gitmark
-cp /tmp/aifw-template/docs/gitmark/ontology.md docs/gitmark/   # the ontology spec, reusable as-is
+cp /tmp/aifw-template/docs/gitmark/README.md /tmp/aifw-template/docs/gitmark/ontology.md docs/gitmark/   # reusable scaffold
 for pat in '.gitmark/' '__pycache__/' '*.pyc'; do grep -qxF "$pat" .gitignore 2>/dev/null || echo "$pat" >> .gitignore; done   # derived index + bytecode — never committed
 python3 .claude/skills/kb-search/gitmark.py index              # build the search index
 ```
@@ -124,7 +124,7 @@ The scaffold starts almost empty (just `ontology.md`).
 **Build the KB now — run `/kb-build`.** It surveys the codebase and fans out curator agents to
 generate per-area docs into `docs/gitmark/` (per-service READMEs, reference specs, runbooks,
 decisions, entry point) following the ontology. This is the step that actually fills the KB —
-skipping it leaves it empty (only `ontology.md`). When it finishes, re-index and lint:
+skipping it leaves only the scaffold (`README.md` + `ontology.md`). When it finishes, re-index and lint:
 
 ```bash
 python3 .claude/skills/kb-search/gitmark.py index   # re-index after /kb-build filled docs/gitmark/

@@ -16,15 +16,15 @@
 | Компонент | Что это |
 |---|---|
 | [`docs/gitmark/ontology.md`](docs/gitmark/ontology.md) | Спека модели: словари `node_type`/`status`, таблица типов связей, инварианты |
-| [`.claude/skills/kb-search`](.claude/skills/kb-search/SKILL.md) | Поиск по KB через GitMark CLI (`bm25`/`trigram`/`fuzzy`) |
-| [`.claude/skills/kb-maintain`](.claude/skills/kb-maintain/SKILL.md) | Правила ведения KB: добавление/правка/перенос доков, frontmatter, связи |
-| `.claude/commands/kb-doc.md` (`/kb-doc`) | Создать/обновить один документ по теме (обёртка над `kb-maintain`) |
-| `.claude/commands/kb-build.md` (`/kb-build`) | Построить всю KB репозитория фан-аутом агентов-кураторов |
+| `.codex/skills/kb-search` или [`.claude/skills/kb-search`](.claude/skills/kb-search/SKILL.md) | Поиск по KB через GitMark CLI (`bm25`/`trigram`/`fuzzy`) |
+| `.codex/skills/kb-maintain` или [`.claude/skills/kb-maintain`](.claude/skills/kb-maintain/SKILL.md) | Правила ведения KB: добавление/правка/перенос доков, frontmatter, связи |
+| `.codex/commands/kb-doc.md` или `.claude/commands/kb-doc.md` (`/kb-doc`) | Создать/обновить один документ по теме (обёртка над `kb-maintain`) |
+| `.codex/commands/kb-build.md` или `.claude/commands/kb-build.md` (`/kb-build`) | Построить всю KB репозитория фан-аутом агентов-кураторов |
 
 ## CLI (GitMark)
 
 ```bash
-G="python3 .claude/skills/kb-search/gitmark.py"
+G="bash .github/scripts/gitmark.sh"
 $G search "<query>" -k 8   # поиск
 $G index                   # пересобрать индекс
 $G lint                    # проверить инварианты I1–I6
@@ -32,7 +32,7 @@ $G stat                    # покрытие KB
 ```
 
 Инварианты (`I1`–`I6`), которые проверяет `lint`, и контролируемые словари — в
-[`docs/gitmark/ontology.md`](docs/gitmark/ontology.md) и в скилле [`kb-maintain`](.claude/skills/kb-maintain/SKILL.md).
+[`docs/gitmark/ontology.md`](docs/gitmark/ontology.md) и в скилле `kb-maintain`.
 
 ## Принципы
 
