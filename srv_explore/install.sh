@@ -58,7 +58,7 @@ SRV_EXPLORE_GUARD=$APP_DIR/.claude/skills/srv-explore/guard.py
 SRV_EXPLORE_AGENT_MD=$APP_DIR/.claude/agents/srv-explore.md
 SRV_EXPLORE_AUDIT=$LOG_DIR/explore.log
 SRV_EXPLORE_TOKENS=$CFG_DIR/tokens.json
-# ANTHROPIC_API_KEY — дописывается деплоем из Environment Secret, не коммитить.
+# Авторизация модели (ANTHROPIC_API_KEY или CLAUDE_CODE_OAUTH_TOKEN) — дописывает деплой, не коммитить.
 EOF
   chmod 0640 "$CFG_DIR/env"
   chown root:"$USER_NAME" "$CFG_DIR/env"
