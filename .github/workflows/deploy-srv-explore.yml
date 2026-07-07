@@ -1,0 +1,62 @@
+name: Deploy srv-explore (host service)
+
+# srv-explore ставится НА ХОСТ (systemd), а не как docker-сервис — поэтому отдельный
+# ручной воркфлоу, вне авто-пайплайна контейнеров (deploy-dev.yml его не трогает).
+# Запуск вручную; окружение prod — под required reviewers самого GitHub Environment.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Куда деплоим srv-explore
+        type: environment
+        required: true
+        default: dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Preflight — конфиг окружения задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -n "$ANTHROPIC_API_KEY" ] || miss="$miss ANTHROPIC_API_KEY"
+          [ -z "$miss" ] || { echo "::error::нет конфига:$miss (Environment → Variables/Secrets)"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Copy srv-explore sources to host
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "srv_explore/**,.claude/skills/srv-explore/**,.claude/agents/srv-explore.md"
+          target: "/srv/deploy/${{ github.event.repository.name }}/srv-explore"
+
+      - name: Install + inject API key + restart
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
+        env:
+          SRV_EXPLORE_ENV: ${{ inputs.environment }}
+          REPO_DIR: /srv/deploy/${{ github.event.repository.name }}/srv-explore
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: SRV_EXPLORE_ENV,REPO_DIR,ANTHROPIC_API_KEY
+          script: >
+            sudo SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh" "$REPO_DIR" &&
+            sudo sed -i '/^ANTHROPIC_API_KEY=/d' /etc/srv-explore/env &&
+            printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" | sudo tee -a /etc/srv-explore/env >/dev/null &&
+            sudo systemctl restart srv-explore.service &&
+            sudo systemctl is-active srv-explore.service

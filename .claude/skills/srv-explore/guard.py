@@ -372,6 +372,10 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     for tok in argv[1:]:
         if forbidden_path(tok):
             return False, f"чтение спецфайла {tok} запрещено (сырое устройство/бесконечный источник)"
+    # On-host сервис читает локально; egress закрыт, чтобы инъекция не увела данные
+    # наружу. DB-клиенты не режем — чтение БД идёт в readonly-роль, это цель.
+    if name in ("curl", "ssh") and os.environ.get("SRV_EXPLORE_NO_NETWORK"):
+        return False, f"{name}: сетевые команды отключены (SRV_EXPLORE_NO_NETWORK) — egress закрыт"
     if name in DB_CLIENTS:
         return check_db_client(argv)
     if name == "curl":

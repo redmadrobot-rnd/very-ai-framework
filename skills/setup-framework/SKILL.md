@@ -227,6 +227,22 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
   namespaced by repo name so several projects can share one host).
 - For private GHCR images, deploy logs in with `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`).
 
+## Step 8b. (optional) srv-explore on the server — readonly explorer as a host service
+
+Beyond the local `/srv-explore` subagent (copied in Step 2), the framework can run the same
+read-only explorer **as a host service** so engineers investigate the server through one MCP
+tool `srv_explore(task)` **without holding SSH**. It lives on the host (systemd, ro OS-user),
+not as a docker service — details in `srv_explore/README.md` and `docs/srv-explore-service-concept.md`.
+
+Skip unless the project wants remote read-only investigation. To enable:
+- add Environment **Secret** `ANTHROPIC_API_KEY` per environment (the on-host agent calls the model);
+- deploy via the **`Deploy srv-explore (host service)`** workflow (`workflow_dispatch`, pick the
+  environment) — it copies sources, runs `srv_explore/install.sh`, injects the key, starts the unit;
+- issue access tokens (admin, on the host): `... token_store ... issue --label <who> --env <env>`;
+  engineers connect with `claude mcp add --transport http srv-explore https://<host>/mcp --header "Authorization: Bearer <token>"`.
+
+Not validated on a live host yet — smoke-test on `dev` before prod.
+
 ## Step 9. Verify the install
 
 - **dev-flow / KB skills** — the agent sees `/kb-doc`, `/kb-build`, `/kb-graph` and the skills

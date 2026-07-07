@@ -1,0 +1,27 @@
+[Unit]
+Description=srv-explore — readonly server explorer (remote MCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=srv-explore
+Group=srv-explore
+# docker (читать docker ps/logs/inspect), systemd-journal (journalctl), adm (/var/log)
+SupplementaryGroups=docker systemd-journal adm
+EnvironmentFile=/etc/srv-explore/env
+WorkingDirectory=/opt/srv-explore
+ExecStart=/opt/srv-explore/venv/bin/python -m srv_explore.mcp_server
+Restart=on-failure
+RestartSec=5
+
+# Read-only на уровне ОС — дополняет гард и readonly-роль БД.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+# Пишем только аудит-лог; всё остальное read-only.
+ReadWritePaths=/var/log/srv-explore
+
+[Install]
+WantedBy=multi-user.target
