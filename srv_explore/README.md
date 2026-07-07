@@ -72,7 +72,12 @@ claude mcp add --transport http srv-explore https://<host>/mcp \
 
 ## Статус проверки
 
-Оттестировано локально (pytest): `token_store`, bearer-авторизация, мост к `guard.py`,
-загрузка промпта, `NO_NETWORK`. **Не** прогонялось на живом хосте: `install.sh`, systemd-
-юнит, деплой-воркфлоу, реальный запуск Agent SDK (нужен ключ + сервер) — требуют
-smoke-теста на dev перед боем.
+- **pytest (локально):** `token_store`, bearer-авторизация, мост к `guard.py`, загрузка
+  промпта, `NO_NETWORK`.
+- **Smoke на dev-хосте (прогнано):** `install.sh` (venv/deps/юзер/юнит), systemd-юнит
+  стартует, remote MCP на `127.0.0.1:8765` отвечает, `initialize`-handshake проходит,
+  bearer-auth работает (нет/неверный токен → 401, верный → 200). Нашло и починило: порт
+  8080 занят docker-proxy → дефолт 8765; `tokens.json` 0600 ломал чтение сервисом → 0640;
+  `python3-venv` доустанавливается в install.
+- **Ещё НЕ прогнано:** реальный запуск агента (`srv_explore(task)` с вызовом модели) —
+  нужен `CLAUDE_CODE_OAUTH_TOKEN` в env сервиса; деплой-воркфлоу (нужен мерж в main).

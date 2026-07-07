@@ -64,10 +64,12 @@ class TokenStore:
         data = json.dumps(
             [asdict(r) for r in self._records], ensure_ascii=False, indent=2
         )
-        # Файл с хэшами токенов — не оставляем мировой доступ.
+        # Файл с хэшами токенов (не сами токены). 0640: владелец пишет, группа
+        # (сервис-юзер) читает. Админ выдаёт от root, сервис читает по группе —
+        # 0600 сломало бы чтение сервисом.
         self.path.write_text(data + "\n", encoding="utf-8")
         try:
-            self.path.chmod(0o600)
+            self.path.chmod(0o640)
         except OSError:
             pass
 

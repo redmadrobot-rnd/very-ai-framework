@@ -254,7 +254,9 @@ def main() -> int:
     import uvicorn
 
     host = os.environ.get("SRV_EXPLORE_HOST", "127.0.0.1")
-    port = int(os.environ.get("SRV_EXPLORE_PORT", "8080"))
+    port = int(
+        os.environ.get("SRV_EXPLORE_PORT", "8765")
+    )  # 8080 часто занят docker-proxy
     uvicorn.run(build_app(), host=host, port=port)
     return 0
 

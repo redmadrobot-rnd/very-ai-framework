@@ -38,7 +38,16 @@ cp -r "$REPO/.claude/skills/srv-explore" "$APP_DIR/.claude/skills/"
 cp "$REPO/.claude/agents/srv-explore.md" "$APP_DIR/.claude/agents/"
 chown -R "$USER_NAME:$USER_NAME" "$APP_DIR"
 
-# 4. venv + зависимости
+# 4. venv + зависимости (на голой Ubuntu ensurepip нет — ставим python3-venv)
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "==> python3-venv отсутствует — доустанавливаю"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv >/dev/null
+  else
+    echo "python3 venv/ensurepip недоступен и нет apt-get — установи python3-venv вручную" >&2
+    exit 1
+  fi
+fi
 if [ ! -x "$APP_DIR/venv/bin/python" ]; then
   python3 -m venv "$APP_DIR/venv"
 fi
@@ -52,7 +61,7 @@ if [ ! -f "$CFG_DIR/env" ]; then
 SRV_EXPLORE_ENV=$ENV_NAME
 SRV_EXPLORE_NO_NETWORK=1
 SRV_EXPLORE_HOST=127.0.0.1
-SRV_EXPLORE_PORT=8080
+SRV_EXPLORE_PORT=8765
 SRV_EXPLORE_CWD=/
 SRV_EXPLORE_GUARD=$APP_DIR/.claude/skills/srv-explore/guard.py
 SRV_EXPLORE_AGENT_MD=$APP_DIR/.claude/agents/srv-explore.md
