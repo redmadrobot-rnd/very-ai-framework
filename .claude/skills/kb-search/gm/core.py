@@ -21,7 +21,15 @@ KB_DIR = "docs/gitmark"
 # Производный индекс — в .gitmark/, она в .gitignore.
 DB_REL = ".gitmark/index.db"
 
+# «Исторические» node_type — датированные снапшоты (замысел до реализации, разовый
+# аудит). Остаются в онтологии (типизированы, связаны, линтуются, на графе), но
+# `search` по умолчанию (scope=live) их прячет: после реализации план расходится с
+# фактом, релевантность аудита падает. Полное знание достаётся `search --scope all`.
+HISTORICAL_TYPES = {"plan", "report"}
+
 HEAD_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$")
+FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+NODE_TYPE_RE = re.compile(r"^\s*node_type\s*:\s*([\w-]+)", re.MULTILINE)
 H1_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 # markdown-ссылка [text](href) — не картинка (отрицательный lookbehind на `!`)
 LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)]+)\)")
@@ -51,6 +59,15 @@ def iter_md(root: Path):
         if any(part in EXCLUDE_DIRS for part in p.relative_to(root).parts):
             continue
         yield p
+
+
+def node_type_of(text: str) -> str | None:
+    """`node_type` из frontmatter документа (или None, если нет FM/ключа)."""
+    m = FM_RE.match(text)
+    if not m:
+        return None
+    t = NODE_TYPE_RE.search(m.group(1))
+    return t.group(1).strip() if t else None
 
 
 def kb_subpath(rel: str) -> str:

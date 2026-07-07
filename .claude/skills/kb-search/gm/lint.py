@@ -10,7 +10,7 @@ from pathlib import Path
 from .core import KB_DIR, LINK_RE, iter_md, kb_subpath, nfc, resolve_link
 
 # Подкаталоги БЗ, где документ считается «несущим» (требует frontmatter с node_type).
-BEARING_DIRS = ("reference", "ops", "decisions", "services")
+BEARING_DIRS = ("reference", "ops", "plans", "decisions", "services")
 
 # Инварианты онтологии: код → описание. Единый источник истины — отсюда же
 # берётся справка CLI. Сами проверки реализованы в cmd_lint и помечают находки кодом.
@@ -26,11 +26,11 @@ INVARIANTS = {
 # Контролируемые словари (фиксированы — ядро модели). `service` НЕ контролируется:
 # это свободное поле, агент-куратор сам решает, к какому компоненту отнести документ.
 NODE_TYPES = {"service", "reference", "runbook", "gotcha", "decision",
-              "guide", "index", "memory"}
+              "plan", "guide", "report", "index"}
 
 STATUSES = {"active", "draft", "deprecated", "archived"}
 
-LOAD_BEARING = {"service", "reference", "runbook", "decision"}
+LOAD_BEARING = {"service", "reference", "runbook", "plan", "decision"}
 
 FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)

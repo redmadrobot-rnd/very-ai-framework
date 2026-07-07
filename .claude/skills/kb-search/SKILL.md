@@ -23,6 +23,9 @@ G="python3 .claude/skills/kb-search/gitmark.py"   # paths are relative to the pr
 
 - Bare `/kb-search` (no query) → `$G stat` + show the `/kb-search <query>` syntax.
 - Add `--json` for machine-readable output.
+- **Scope** — default hides historical docs (`plan`/`report`: stale plans, one-off audits).
+  Add `--scope all` to include them, or `--scope history` for only those (e.g. "what was the
+  original plan for X").
 - Visual overview of the whole KB → `/kb-graph` (separate script `graph.py`; HTML ontology graph).
 
 ## Principles

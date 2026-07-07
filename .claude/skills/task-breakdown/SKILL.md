@@ -45,8 +45,9 @@ formatting, it's the contract by which `/goal` knows the task is closed.
 ## Artifact structure
 - A small feature — one `.md` with the task list.
 - A large one — a **task folder** (one file per task) + the order/dependencies between them.
-- Location: `docs/work/<feature>/` — outside the KB (`docs/gitmark/`), tasks are working
-  artifacts, not knowledge.
+- Location: `docs/gitmark/plans/<feature>/` — `node_type: plan`. Tasks stay in the KB
+  (typed, linked, linted), but as **historical** docs: `search` hides them by default,
+  so they don't drown live knowledge once the feature ships.
 
 ## User interaction and handoff
 1. The agent shows the breakdown **before** launching and states the scope boundaries.

@@ -35,9 +35,9 @@ LINK_TYPES = ("documents", "depends_on", "supersedes", "relates_to",
 # Цвета узлов по node_type (совпадают с палитрой отчётов).
 NODE_COLORS = {
     "service": "#7c9cff", "reference": "#00d3a7", "runbook": "#f59e0b",
-    "gotcha": "#ef4444", "decision": "#a78bfa",
-    "guide": "#34d399", "index": "#94a3b8",
-    "memory": "#f472b6", "untyped": "#525866",
+    "gotcha": "#ef4444", "decision": "#a78bfa", "plan": "#38bdf8",
+    "guide": "#34d399", "report": "#fbbf24", "index": "#94a3b8",
+    "untyped": "#525866",
 }
 EDGE_COLORS = {
     "documents": "#34d399", "implemented_by": "#34d399",

@@ -23,15 +23,20 @@ Each document has exactly one `node_type` — its "table" in the ontology.
 | `runbook` | operational procedure ("how to X") | `docs/gitmark/ops/` |
 | `gotcha` | a pitfall + how to avoid it | `docs/gitmark/ops/` |
 | `decision` | an architectural/product decision (ADR) | `docs/gitmark/decisions/` |
+| `plan` | a plan/design before implementation | `docs/gitmark/plans/` |
 | `guide` | how to use something (clients, public API) | varies |
+| `report` | a one-off dated analysis/audit | `docs/gitmark/reviews/` |
 | `index` | a folder's table of contents | any `README.md` |
 
 > The KB lives under `docs/gitmark/` (so the rest of `docs/` stays free for non-KB
 > material). All folders below are relative to it; only this tree is scanned/linted.
-> The KB holds **living knowledge only** — docs that must stay current. Process
-> artifacts (plans, task breakdowns, one-off analyses/audits) live in `docs/work/`,
-> outside the KB: they are dated snapshots and are never updated. Durable findings
-> from them are distilled into `reference`/`gotcha`/`decision` docs.
+
+**Living vs historical.** All docs stay in the ontology — typed, linked, linted, on the
+graph. But `plan` and `report` are **historical**: dated snapshots (intent before build,
+a one-off audit) that go stale — a `plan` diverges from what shipped, an audit's relevance
+fades. So `search` hides them by default (`--scope live`); reach them with `--scope all`
+(or `--scope history` for only those). Everything else is **living knowledge** and must stay
+current; distill durable findings from a plan/report into `reference`/`gotcha`/`decision`.
 
 Rule: if unsure, a spec is `reference`, a how-to is `guide`. Add a new type only if
 none fit and there will be ≥3 such documents.
@@ -56,7 +61,7 @@ links:                      # typed links (see below), optional
 ```
 
 Required: `node_type`. Strongly recommended for load-bearing docs
-(`service|reference|runbook|decision`): `title`, `service`, `status`, `updated`.
+(`service|reference|runbook|plan|decision`): `title`, `service`, `status`, `updated`.
 
 `service` is a **free-form** label — the curator (human or agent) decides which
 component a doc belongs to. It is not validated against a fixed vocabulary.

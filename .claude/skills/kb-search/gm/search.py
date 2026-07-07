@@ -8,7 +8,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from .core import DB_REL
+from .core import DB_REL, HISTORICAL_TYPES
 
 WORD_RE = re.compile(r"[\w\-]+", re.UNICODE)
 
@@ -39,12 +39,31 @@ def _fuzzy_phrases(s: str) -> list:
     return wins
 
 
-def cmd_search(root: Path, query: str, k: int = 8) -> list:
+def cmd_search(root: Path, query: str, k: int = 8, scope: str = "live") -> list:
+    """Искать по индексу. scope: live — без историч. типов (plan/report), history —
+    только они, all — всё. Классификация — по колонке files.node_type."""
     db = root / DB_REL
     if not db.exists():
         raise SystemExit("Индекс не найден — запусти `gitmark index`")
     con = sqlite3.connect(db)
     has_tri = (con.execute("SELECT v FROM meta WHERE k='trigram'").fetchone() or ("0",))[0] == "1"
+
+    # Пути историч. доков — фильтр по scope. Пустой список типов не ломает SQL.
+    hist: set = set()
+    if scope != "all" and HISTORICAL_TYPES:
+        ph = ",".join("?" * len(HISTORICAL_TYPES))
+        try:
+            hist = {p for (p,) in con.execute(
+                f"SELECT path FROM files WHERE node_type IN ({ph})",
+                tuple(HISTORICAL_TYPES))}
+        except sqlite3.OperationalError:
+            hist = set()
+    if scope == "history":
+        keep = lambda p: p in hist  # noqa: E731
+    elif scope == "all":
+        keep = lambda p: True  # noqa: E731
+    else:
+        keep = lambda p: p not in hist  # noqa: E731
     results: dict = {}
 
     # bm25 — ранжировка по терминам (вес 1.0)
@@ -106,4 +125,5 @@ def cmd_search(root: Path, query: str, k: int = 8) -> list:
             except sqlite3.OperationalError:
                 pass
     con.close()
-    return sorted(results.values(), key=lambda r: -r["score"])[:k]
+    hits = [r for r in results.values() if keep(r["path"])]
+    return sorted(hits, key=lambda r: -r["score"])[:k]

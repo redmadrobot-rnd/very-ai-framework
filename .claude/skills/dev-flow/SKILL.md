@@ -54,10 +54,11 @@ The goal is the **minimal viable path**. In dialogue with the user the agent:
 - compares with alternatives and **justifies** the engineering decisions made.
 **The output is agreed with the user:** the stack is fixed, the HLD is described.
 
-Working artifacts of the run (proposal, research notes, HLD, task breakdown) live in
-**`docs/work/<feature>/`** — in git, but outside the KB (`docs/gitmark/`): they are dated
-snapshots of intent, nobody updates them after the run, and KB search/lint must not
-surface them as current knowledge.
+Working artifacts of the run (proposal, research notes, HLD, task breakdown) go into the
+KB as `plan`/`report` docs (under `docs/gitmark/plans/<feature>/` · `reviews/`) — typed,
+linked and linted like everything else. They are **historical**, though: dated snapshots
+of intent that nobody updates after the run, so KB `search` hides them by default
+(`--scope live`); reach them with `--scope all`.
 
 ## 5. Tasks and /goal — the agent writes the plan, the human accepts it
 The accumulated context (HLD + stack + decisions) is sliced into tasks per the
@@ -86,9 +87,9 @@ On Codex comments (severity high/medium) and on the `@claude` tag the agent make
 With the PR the agent attaches a **short digest of the specs and key engineering decisions**
 (for the reviewer to look at: data models and DB entities, indexes, protocols, API endpoints).
 Merge — **after human approval**. dev/prod deploy is automatic. After it — the agent
-**distills the results into the KB**: updates the `service`/`reference` docs to match what
+**distills the results into living KB**: updates the `service`/`reference` docs to match what
 was actually built, records a `decision` (ADR) if an architectural choice was made. The
-plan in `docs/work/` stays as-is — history, not documentation.
+`plan`/`report` docs stay as-is — history, hidden from default search, not living docs.
 
 ## Interaction principles
 - Ask **before** starting whatever isn't derivable from the code; silently gather what is.
