@@ -23,17 +23,15 @@ jobs:
           SSH_HOST: ${{ vars.SSH_HOST }}
           SSH_USER: ${{ vars.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           miss=""
           [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
           [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
           [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
-          # Агенту нужен доступ к модели — любой из двух: API-ключ или OAuth-токен CLI.
-          [ -n "$ANTHROPIC_API_KEY$CLAUDE_CODE_OAUTH_TOKEN" ] \
-            || miss="$miss (ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"
-          [ -z "$miss" ] || { echo "::error::нет конфига:$miss (Environment → Variables/Secrets)"; exit 1; }
+          # Агент = claude CLI внутри Agent SDK → авторизуется CLAUDE_CODE_OAUTH_TOKEN.
+          [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || miss="$miss CLAUDE_CODE_OAUTH_TOKEN"
+          [ -z "$miss" ] || { echo "::error::нет конфига:$miss (Environment/repo → Variables/Secrets)"; exit 1; }
 
       - uses: actions/checkout@v4
 
@@ -51,22 +49,17 @@ jobs:
         env:
           SRV_EXPLORE_ENV: ${{ inputs.environment }}
           REPO_DIR: /srv/deploy/${{ github.event.repository.name }}/srv-explore
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: SRV_EXPLORE_ENV,REPO_DIR,ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN
+          envs: SRV_EXPLORE_ENV,REPO_DIR,CLAUDE_CODE_OAUTH_TOKEN
           script: |
             set -euo pipefail
             SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
             $SUDO env SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh" "$REPO_DIR"
-            # Пишем в env только заданные ключи (любой из двух авторизует агента к модели).
-            for name in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
-              val="$(printenv "$name" || true)"
-              $SUDO sed -i "/^$name=/d" /etc/srv-explore/env
-              [ -n "$val" ] && printf '%s=%s\n' "$name" "$val" | $SUDO tee -a /etc/srv-explore/env >/dev/null || true
-            done
+            $SUDO sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/srv-explore/env
+            printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" | $SUDO tee -a /etc/srv-explore/env >/dev/null
             $SUDO systemctl restart srv-explore.service
             $SUDO systemctl is-active srv-explore.service

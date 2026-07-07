@@ -235,8 +235,8 @@ tool `srv_explore(task)` **without holding SSH**. It lives on the host (systemd,
 not as a docker service — details in `srv_explore/README.md` and `docs/srv-explore-service-concept.md`.
 
 Skip unless the project wants remote read-only investigation. To enable:
-- model auth per environment — **either** `ANTHROPIC_API_KEY` **or** the existing repo
-  `CLAUDE_CODE_OAUTH_TOKEN` (reusable, no new secret needed) as an Environment/repo Secret;
+- model auth — `CLAUDE_CODE_OAUTH_TOKEN` (the agent is the `claude` CLI inside the Agent SDK);
+  the repo already has this secret for `@claude` — reuse it, no new secret needed;
 - deploy via the **`Deploy srv-explore (host service)`** workflow (`workflow_dispatch`, pick the
   environment) — it copies sources, runs `srv_explore/install.sh`, injects the key, starts the unit;
 - issue access tokens (admin, on the host): `... token_store ... issue --label <who> --env <env>`;

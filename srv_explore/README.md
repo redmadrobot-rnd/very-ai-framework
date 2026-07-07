@@ -31,17 +31,16 @@ ro OS-пользователем; это единственный компоне
 окружения). Он копирует исходники, зовёт `install.sh`, дописывает авторизацию к модели из
 Environment Secret и рестартует юнит. Prod — под required reviewers самого Environment.
 
-Авторизация к модели — **любой из двух** секретов: `ANTHROPIC_API_KEY` или
-`CLAUDE_CODE_OAUTH_TOKEN` (второй уже есть в репо для `@claude` — можно переиспользовать,
-новый секрет не заводить). Деплой пишет тот, что задан.
+Авторизация к модели — `CLAUDE_CODE_OAUTH_TOKEN` (агент = `claude` CLI внутри Agent SDK,
+им и авторизуется). Токен уже есть в репо для `@claude` — переиспользуем, новый секрет не
+заводим. Деплой пишет его в env.
 
 Вручную на хосте (от root):
 
 ```bash
 SRV_EXPLORE_ENV=dev bash srv_explore/install.sh /path/to/repo
-# затем один раз положить авторизацию модели (любой из двух):
-echo 'ANTHROPIC_API_KEY=sk-ant-...' >> /etc/srv-explore/env      # или:
-echo 'CLAUDE_CODE_OAUTH_TOKEN=...'  >> /etc/srv-explore/env
+# затем один раз положить авторизацию модели:
+echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> /etc/srv-explore/env
 systemctl restart srv-explore
 ```
 
@@ -69,7 +68,7 @@ claude mcp add --transport http srv-explore https://<host>/mcp \
 `SRV_EXPLORE_ENV` (dev|prod — идентичность инстанса, к ней привязан токен) ·
 `SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind, не в
 открытый интернет — TLS за reverse-proxy окружения) · `SRV_EXPLORE_GUARD`/`AGENT_MD`/
-`AUDIT`/`TOKENS`/`CWD` · `ANTHROPIC_API_KEY` **или** `CLAUDE_CODE_OAUTH_TOKEN` (секрет, пишет деплой).
+`AUDIT`/`TOKENS`/`CWD` · `CLAUDE_CODE_OAUTH_TOKEN` (авторизация модели, секрет, пишет деплой).
 
 ## Статус проверки
 
