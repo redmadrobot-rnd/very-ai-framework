@@ -82,6 +82,8 @@ jobs:
       markers: ''
 
   # Промоут: для каждого сервиса зафиксированный digest -> :<vX>. Без сборки.
+  # Один job с циклом, не matrix: операция секундная, 11 раннеров — оверхед.
+  # imagetools create идемпотентен, безопасно ре-ранить job целиком.
   promote:
     needs: [prepare, tests]
     if: ${{ needs.prepare.outputs.services != '[]' }}
@@ -90,10 +92,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJson(needs.prepare.outputs.services) }}
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -101,16 +99,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Stamp version onto pinned digest
+      - name: Stamp version onto pinned digests
         env:
-          SVC: ${{ matrix.service }}
           REF: ${{ github.ref_name }}
-          DIGEST: ${{ fromJson(needs.prepare.outputs.digests)[matrix.service] }}
+          DIGESTS: ${{ needs.prepare.outputs.digests }}
+        # Не останавливаемся на первом упавшем сервисе (аналог fail-fast: false):
+        # промоутим все, кого можем, и падаем в конце со списком проблемных.
         run: |
-          [ -n "$DIGEST" ] || { echo "::error::нет зафиксированного digest для $SVC"; exit 1; }
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          echo "promote $SVC: $DIGEST -> :$REF"
-          docker buildx imagetools create -t "$PREFIX/$SVC:$REF" "$PREFIX/$SVC@$DIGEST"
+          failed=""
+          for svc in $(jq -r 'keys[]' <<<"$DIGESTS"); do
+            digest=$(jq -r --arg s "$svc" '.[$s]' <<<"$DIGESTS")
+            echo "promote $svc: $digest -> :$REF"
+            docker buildx imagetools create -t "$PREFIX/$svc:$REF" "$PREFIX/$svc@$digest" \
+              || failed="$failed $svc"
+          done
+          [ -z "$failed" ] || { echo "::error::promote упал для:$failed"; exit 1; }
 
   deploy-prod:
     needs: [prepare, promote]
