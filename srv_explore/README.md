@@ -20,7 +20,7 @@ ro OS-пользователем; единственный компонент в
   каждая Bash-команда агента проходит через `guard.py`. `curl`/`ssh` off
   (`SRV_EXPLORE_NO_NETWORK`), egress закрыт.
 - `guard.py` + `profiles/` — PreToolUse-гард (default-deny allowlist) и профили
-  (shell + SQL). Единый источник правды политики «только чтение».
+  (shell + БД: postgres/mongo/redis/rabbitmq). Единый источник правды политики «только чтение».
 - `agent_prompt.md` — системный промпт readonly-агента (правила + формат отчёта).
 - `token_store.py` (+ CLI) — bearer-токены: админ выдаёт/отзывает, на сервере только `sha256`.
 - `install.sh` + `systemd/srv-explore.service` + `requirements.txt` — установка на хост.

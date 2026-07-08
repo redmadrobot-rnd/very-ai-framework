@@ -82,6 +82,23 @@ ALLOW = [
     "uniq -c app.log",
     "journalctl -F _SYSTEMD_UNIT",
     "tree -L 2 /app",
+    # mongo / redis / rabbitmq — read
+    'mongosh --eval "db.users.find({}).limit(5)"',
+    'mongosh --quiet mongodb://localhost/app --eval "db.users.countDocuments({})"',
+    'mongosh --eval "db.stats()"',
+    "mongosh --eval \"db.coll.aggregate([{'$match':{a:1}}])\"",
+    "redis-cli GET session:123",
+    "redis-cli INFO",
+    "redis-cli CONFIG GET maxmemory",
+    "redis-cli HGETALL user:1",
+    "redis-cli -n 2 SCAN 0",
+    "redis-cli -a secret INFO",
+    "redis-cli MEMORY USAGE user:1",
+    "redis-cli ACL WHOAMI",
+    "rabbitmqctl list_queues name messages",
+    "rabbitmqctl status",
+    "rabbitmqctl -n rabbit@host cluster_status",
+    "rabbitmqctl list_connections",
 ]
 
 DENY = [
@@ -179,6 +196,30 @@ DENY = [
     "docker logs -ft web",
     "journalctl -fu nginx",
     "docker compose logs -ft",
+    # mongo — мутации / обходы
+    'mongosh --eval "db.users.insertOne({a:1})"',
+    'mongosh --eval "db.users.drop()"',
+    'mongosh --eval "db.users.updateMany({}, {})"',
+    "mongosh --eval \"db.coll.aggregate([{'$out':'dump'}])\"",
+    'mongosh --eval "db.runCommand({ping:1})"',
+    "mongosh --file /tmp/x.js",
+    "mongosh",
+    'mongosh --eval "db.a.find()" --eval "db.b.drop()"',
+    # redis — записи / опасное / обходы
+    "redis-cli SET k v",
+    "redis-cli DEL k",
+    "redis-cli FLUSHALL",
+    "redis-cli CONFIG SET maxmemory 0",
+    "redis-cli DEBUG SLEEP 10",
+    "redis-cli ACL SETUSER bob on",
+    "redis-cli CLIENT KILL ID 5",
+    "redis-cli --eval /tmp/x.lua",
+    "redis-cli",
+    # rabbitmq — write-подкоманды
+    "rabbitmqctl add_user bob pw",
+    "rabbitmqctl stop_app",
+    "rabbitmqctl delete_queue myqueue",
+    "rabbitmqctl set_permissions -p / bob .* .* .*",
 ]
 
 

@@ -180,21 +180,34 @@ def sql_read_guard(sql: str, profile: dict) -> tuple[bool, str]:
     return True, "sql read-only"
 
 
-def find_sql_profile(client: str) -> dict | None:
+def find_client_profile(client: str, kind: str | None = None) -> dict | None:
+    """Профиль по имени клиента; если задан kind — ещё и по типу диалекта."""
     for f in PROFILES.glob("*.json"):
         if f.name == "shell.json":
             continue
         prof = load_json(f.name)
-        if prof.get("client") == client and prof.get("kind") == "sql":
+        if prof.get("client") == client and (kind is None or prof.get("kind") == kind):
             return prof
     return None
 
 
 def check_db_client(argv: list[str]) -> tuple[bool, str]:
+    """Диспатч по kind профиля клиента: sql / mongo / redis."""
     client = os.path.basename(argv[0])
-    prof = find_sql_profile(client)
+    prof = find_client_profile(client)
     if not prof:
-        return False, f"нет SQL-профиля для клиента {client}"
+        return False, f"нет профиля для клиента {client}"
+    kind = prof.get("kind")
+    if kind == "sql":
+        return check_sql_client(argv, prof)
+    if kind == "mongo":
+        return check_mongo_client(argv, prof)
+    if kind == "redis":
+        return check_redis_client(argv, prof)
+    return False, f"клиент {client}: профиль kind={kind!r} не поддержан гардом"
+
+
+def check_sql_client(argv: list[str], prof: dict) -> tuple[bool, str]:
     cmds = []
     i = 1
     while i < len(argv):
@@ -219,6 +232,82 @@ def check_db_client(argv: list[str]) -> tuple[bool, str]:
         # psql исполняет КАЖДЫЙ -c по порядку — проверить только последний нельзя
         return False, "несколько -c/--command запрещено (одна инструкция на запрос)"
     return sql_read_guard(cmds[0], prof)
+
+
+# --- MongoDB (mongosh --eval) ------------------------------------------------
+
+def mongo_read_guard(js: str, prof: dict) -> tuple[bool, str]:
+    body = js.strip()
+    if not body:
+        return False, "пустой --eval"
+    # Мутирующие методы/стадии/команды ловим подстрокой: имена характерны, а $out/$merge
+    # не ловятся \b (символ $). Честный агент читает — этого достаточно как defense.
+    low = body.lower()
+    for kw in prof.get("forbid_keywords", []):
+        if kw.lower() in low:
+            return False, f"mongo: запрещённый метод/оператор: {kw}"
+    return True, "mongo read-only (--eval)"
+
+
+def check_mongo_client(argv: list[str], prof: dict) -> tuple[bool, str]:
+    evals: list[str] = []
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        # скрипт из файла не проверяется гардом
+        if a in ("-f", "--file") or a.startswith("--file=") or (a.startswith("-f") and len(a) > 2):
+            return False, "mongosh --file (скрипт из файла) не проверяется гардом — запрещено"
+        if a in ("--eval", "-e"):
+            if i + 1 >= len(argv):
+                return False, "mongosh --eval без аргумента"
+            evals.append(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--eval="):
+            evals.append(a.split("=", 1)[1])
+        i += 1
+    if not evals:
+        return False, 'mongosh: интерактив/скрипт запрещён — используй --eval "db.coll.find(...)"'
+    if len(evals) > 1:
+        return False, "несколько --eval запрещено (одна инструкция на запрос)"
+    return mongo_read_guard(evals[0], prof)
+
+
+# --- Redis (redis-cli) -------------------------------------------------------
+
+def check_redis_client(argv: list[str], prof: dict) -> tuple[bool, str]:
+    value_flags = set(prof.get("value_flags", []))
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--eval", "-x", "--pipe", "--pipe-mode"):
+            return False, f"redis-cli {a}: Lua/stdin/pipe-режим запрещён"
+        if a in value_flags:
+            i += 2
+            continue
+        if a.startswith("--") and "=" in a and a.split("=", 1)[0] in value_flags:
+            i += 1
+            continue
+        if a.startswith("-"):
+            # прочие флаги подключения (--tls, --no-auth-warning, -3, …) — булевы, пропускаем
+            i += 1
+            continue
+        # первый позиционный — это команда
+        verb = a.upper()
+        rest = argv[i + 1:]
+        sub_reads = {k.upper(): [s.upper() for s in v]
+                     for k, v in prof.get("subcommand_reads", {}).items()}
+        if verb in sub_reads:
+            if not rest:
+                return False, f"redis-cli {verb}: нужна read-подкоманда ({', '.join(sub_reads[verb])})"
+            sub = rest[0].upper()
+            if sub not in sub_reads[verb]:
+                return False, f"redis-cli {verb} {rest[0]}: не read (разрешено: {', '.join(sub_reads[verb])})"
+            return True, f"redis {verb} {sub} (read)"
+        if verb in [c.upper() for c in prof.get("allow_commands", [])]:
+            return True, f"redis {verb} (read)"
+        return False, f"redis-cli {verb}: не read-only команда (не в allowlist)"
+    return False, 'redis-cli: интерактив без команды запрещён — используй "GET key" и т.п.'
 
 
 # --- curl (allowlist безопасного GET) ----------------------------------------
@@ -341,6 +430,18 @@ def check_systemctl(argv: list[str], shell: dict) -> tuple[bool, str]:
     return False, f"systemctl {sub}: не read-only"
 
 
+def check_rabbitmqctl(argv: list[str]) -> tuple[bool, str]:
+    prof = find_client_profile("rabbitmqctl", kind="verb")
+    if not prof:
+        return False, "нет профиля rabbitmq"
+    sub, _ = subcommand(argv[1:], set(prof.get("value_flags", [])))
+    if sub is None:
+        return False, "rabbitmqctl без подкоманды"
+    if sub in prof.get("read_subcommands", []):
+        return True, f"rabbitmqctl {sub} (read)"
+    return False, f"rabbitmqctl {sub}: не read-only подкоманда"
+
+
 def check_ssh(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     i = 1
     while i < len(argv):
@@ -384,6 +485,8 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         return check_docker(argv, shell, depth)
     if name == "systemctl":
         return check_systemctl(argv, shell)
+    if name == "rabbitmqctl":
+        return check_rabbitmqctl(argv)
     if name == "ssh":
         return check_ssh(argv, shell, depth)
     if name == "tail" and tail_follows(argv[1:]):
