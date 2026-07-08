@@ -1,8 +1,8 @@
 """Remote MCP srv-explore: на хосте живёт readonly-агент, на вход — задача.
 
 Инженер из своего Claude Code дёргает tool `srv_explore(task)`; сервер крутит Claude
-Agent SDK headless с нашим readonly-агентом, а каждую Bash-команду агента пропускает
-через тот же `guard.py`, что и локальный субагент (единый источник правды политики).
+Agent SDK headless с readonly-агентом, а каждую Bash-команду агента пропускает через
+`guard.py` (единый источник правды политики «только чтение»).
 
 Границы, которые держат «только чтение», живут ЗДЕСЬ, на сервере, вне машины инженера:
 - `guard.py` PreToolUse-мостом режет не-read (curl/ssh off: `SRV_EXPLORE_NO_NETWORK`);
@@ -24,9 +24,9 @@ from pathlib import Path
 
 from srv_explore.token_store import TokenStore
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_GUARD = REPO_ROOT / ".claude" / "skills" / "srv-explore" / "guard.py"
-DEFAULT_AGENT_MD = REPO_ROOT / ".claude" / "agents" / "srv-explore.md"
+HERE = Path(__file__).resolve().parent
+DEFAULT_GUARD = HERE / "guard.py"
+DEFAULT_PROMPT = HERE / "agent_prompt.md"
 
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 
@@ -115,13 +115,13 @@ def make_pretooluse_hook():
     return hook
 
 
-def load_system_prompt(agent_md: Path | None = None) -> str:
-    """Тело промпта субагента из .claude/agents/srv-explore.md (без frontmatter)."""
-    path = agent_md or Path(
-        os.environ.get("SRV_EXPLORE_AGENT_MD", str(DEFAULT_AGENT_MD))
+def load_system_prompt(prompt_file: Path | None = None) -> str:
+    """Системный промпт readonly-агента из srv_explore/agent_prompt.md."""
+    path = prompt_file or Path(
+        os.environ.get("SRV_EXPLORE_PROMPT", str(DEFAULT_PROMPT))
     )
     text = path.read_text(encoding="utf-8")
-    if text.startswith("---"):
+    if text.startswith("---"):  # на случай, если файл всё же с frontmatter
         end = text.find("\n---", 3)
         if end != -1:
             text = text[end + 4 :]

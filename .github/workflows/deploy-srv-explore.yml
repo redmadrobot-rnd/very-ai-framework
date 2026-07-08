@@ -41,7 +41,7 @@ jobs:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "srv_explore/**,.claude/skills/srv-explore/**,.claude/agents/srv-explore.md"
+          source: "srv_explore/**"
           target: "/srv/deploy/${{ github.event.repository.name }}/srv-explore"
 
       - name: Install + inject model auth + restart
@@ -58,7 +58,7 @@ jobs:
           script: |
             set -euo pipefail
             SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-            $SUDO env SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh" "$REPO_DIR"
+            $SUDO env SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh"
             $SUDO sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/srv-explore/env
             printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" | $SUDO tee -a /etc/srv-explore/env >/dev/null
             $SUDO systemctl restart srv-explore.service

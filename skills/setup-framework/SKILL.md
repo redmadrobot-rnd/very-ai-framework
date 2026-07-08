@@ -83,7 +83,7 @@ is **not** part of the copy):
 mkdir -p .claude/skills .claude/commands .claude/agents
 cp -r /tmp/aifw-template/.claude/skills/* .claude/skills/
 cp /tmp/aifw-template/.claude/commands/*.md .claude/commands/
-cp /tmp/aifw-template/.claude/agents/*.md .claude/agents/    # напр. srv-explore (readonly-эксплорер + guard-хук)
+cp /tmp/aifw-template/.claude/agents/*.md .claude/agents/ 2>/dev/null || true   # субагенты, если есть
 # tidy: drop any copied bytecode caches (regenerated, gitignored)
 find .claude/skills -type d -name __pycache__ -prune -exec rm -rf {} +
 ```
@@ -227,22 +227,28 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
   namespaced by repo name so several projects can share one host).
 - For private GHCR images, deploy logs in with `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`).
 
-## Step 8b. (optional) srv-explore on the server — readonly explorer as a host service
+## Step 8b. (optional) srv-explore — readonly server explorer
 
-Beyond the local `/srv-explore` subagent (copied in Step 2), the framework can run the same
-read-only explorer **as a host service** so engineers investigate the server through one MCP
-tool `srv_explore(task)` **without holding SSH**. It lives on the host (systemd, ro OS-user),
-not as a docker service — details in `srv_explore/README.md` and `docs/srv-explore-service-concept.md`.
+Lets engineers investigate a server (logs/files/code/containers/DB) read-only through one MCP
+tool `srv_explore(task)` **without holding SSH**. Two isolated parts:
 
-Skip unless the project wants remote read-only investigation. To enable:
+**A. Server bundle** (`srv_explore/`) — self-contained service (remote MCP + agent + `guard.py`),
+installed on the host (systemd, ro OS-user), NOT as a docker service. Full guide:
+`srv_explore/README.md`; concept: `srv_explore/docs/concept.md`.
 - model auth — `CLAUDE_CODE_OAUTH_TOKEN` (the agent is the `claude` CLI inside the Agent SDK);
   the repo already has this secret for `@claude` — reuse it, no new secret needed;
 - deploy via the **`Deploy srv-explore (host service)`** workflow (`workflow_dispatch`, pick the
-  environment) — it copies sources, runs `srv_explore/install.sh`, injects the key, starts the unit;
-- issue access tokens (admin, on the host): `... token_store ... issue --label <who> --env <env>`;
-  engineers connect with `claude mcp add --transport http srv-explore https://<host>/mcp --header "Authorization: Bearer <token>"`.
+  environment) — it copies `srv_explore/`, runs `install.sh`, injects the token, starts the unit;
+- issue access tokens (admin, on the host, from `/opt/srv-explore`):
+  `sudo venv/bin/python -m srv_explore.token_store --store /etc/srv-explore/tokens.json issue --label <who> --env <env>`.
 
-Not validated on a live host yet — smoke-test on `dev` before prod.
+**B. Connector** (`.claude/skills/srv-explore/` + `.claude/commands/srv-explore.md`, copied in
+Step 2) — how engineers reach the running service from their Claude Code:
+`claude mcp add --transport http srv-explore https://<host>/mcp --header "Authorization: Bearer <token>"`,
+then `/srv-explore <question>` or the `srv_explore` MCP tool.
+
+Skip entirely if the project doesn't need it. Smoke-tested on a dev host (service starts, MCP +
+bearer auth + real agent run + read-only deny path verified).
 
 ## Step 9. Verify the install
 

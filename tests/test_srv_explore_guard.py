@@ -15,8 +15,7 @@ from pathlib import Path
 
 import pytest
 
-SKILL_DIR = Path(__file__).resolve().parents[1] / ".claude" / "skills" / "srv-explore"
-GUARD = SKILL_DIR / "guard.py"
+GUARD = Path(__file__).resolve().parents[1] / "srv_explore" / "guard.py"
 
 
 def run_guard(
