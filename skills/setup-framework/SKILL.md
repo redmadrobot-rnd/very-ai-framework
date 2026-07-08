@@ -234,7 +234,7 @@ tool `srv_explore(task)` **without holding SSH**. Two isolated parts:
 
 **A. Server bundle** (`srv_explore/`) — self-contained service (remote MCP + agent + `guard.py`),
 installed on the host (systemd, ro OS-user), NOT as a docker service. Full guide:
-`srv_explore/README.md`; concept: `srv_explore/docs/concept.md`.
+`srv_explore/README.md`.
 - model auth — `CLAUDE_CODE_OAUTH_TOKEN` (the agent is the `claude` CLI inside the Agent SDK);
   the repo already has this secret for `@claude` — reuse it, no new secret needed;
 - deploy via the **`Deploy srv-explore (host service)`** workflow (`workflow_dispatch`, pick the
