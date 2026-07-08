@@ -50,9 +50,19 @@ export COMPOSE_PROJECT_NAME="$CPN"
 # Environment Variable COMPOSE_PROFILES через ssh-action. Пусто = все дефолтные сервисы.
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 
+# хэш docker-compose.yml: сменился (или сервисы не заданы) → пересоздаём весь стек,
+# иначе только затронутые.
+STACK_SHA="$(sha256sum docker-compose.yml | cut -c1-16)"
 echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:-all}'"
-# shellcheck disable=SC2086
-docker compose pull $SERVICES
-# shellcheck disable=SC2086
-docker compose up -d --wait --wait-timeout 300 --force-recreate $SERVICES
+if [ -n "$SERVICES" ] && [ "$STACK_SHA" = "$(cat .stack.sha 2>/dev/null || true)" ]; then
+  # shellcheck disable=SC2086
+  docker compose --compatibility pull $SERVICES
+  # shellcheck disable=SC2086
+  docker compose --compatibility up -d --wait --wait-timeout 300 --force-recreate $SERVICES
+else
+  # весь стек; --remove-orphans убирает контейнеры выпавших из compose/профилей сервисов
+  docker compose --compatibility pull
+  docker compose --compatibility up -d --wait --wait-timeout 300 --force-recreate --remove-orphans
+  echo "$STACK_SHA" > .stack.sha
+fi
 docker compose ps
