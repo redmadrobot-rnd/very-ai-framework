@@ -89,7 +89,7 @@ With the PR the agent attaches a **short digest of the specs and key engineering
 Merge — **after human approval**. dev/prod deploy is automatic. After it — the agent
 **distills the results into living KB**: updates the `service`/`reference` docs to match what
 was actually built, records a `decision` (ADR) if an architectural choice was made. The
-`plan`/`report` docs stay as-is — history, hidden from default search, not living docs.
+`plan`/`report` docs stay as-is — history, not living docs.
 
 ## Interaction principles
 - Ask **before** starting whatever isn't derivable from the code; silently gather what is.
