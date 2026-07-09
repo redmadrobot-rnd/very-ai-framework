@@ -1,0 +1,64 @@
+name: Build images (reusable)
+
+# Сборка и push docker-образов сервисов в GHCR. Общий блок для deploy-dev и
+# manual-deploy, чтобы не дублировать buildx/login/push в двух файлах.
+on:
+  workflow_call:
+    inputs:
+      services:
+        description: 'JSON-массив сервисов для сборки'
+        required: true
+        type: string
+      tags:
+        description: 'теги образов через пробел (напр. "<sha> latest")'
+        required: true
+        type: string
+
+env:
+  SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(inputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: img
+        # полные refs образов: <prefix>/<svc>:<tag> для каждого тега из inputs.tags
+        env:
+          TAGS: ${{ inputs.tags }}
+          SVC: ${{ matrix.service }}
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          {
+            echo "tags<<EOF"
+            for t in $TAGS; do echo "$prefix/$SVC:$t"; done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: ${{ steps.img.outputs.tags }}
