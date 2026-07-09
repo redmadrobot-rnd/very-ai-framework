@@ -86,7 +86,10 @@ On Codex comments (severity high/medium) and on the `@claude` tag the agent make
 ## 8. Review and deploy — the human has the final word
 With the PR the agent attaches a **short digest of the specs and key engineering decisions**
 (for the reviewer to look at: data models and DB entities, indexes, protocols, API endpoints).
-Merge — **after human approval**. dev/prod deploy is automatic.
+Merge — **after human approval**. dev/prod deploy is automatic. After merge, reconcile the
+living docs with what actually shipped: update the touched `service`/`reference` docs (via
+`kb-maintain`), add a `decision` for any lasting architectural choice. The `plan`/`report`
+stays as the dated snapshot.
 
 ## Interaction principles
 - Ask **before** starting whatever isn't derivable from the code; silently gather what is.
