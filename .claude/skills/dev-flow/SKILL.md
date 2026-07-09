@@ -55,10 +55,8 @@ The goal is the **minimal viable path**. In dialogue with the user the agent:
 **The output is agreed with the user:** the stack is fixed, the HLD is described.
 
 Working artifacts of the run (proposal, research notes, HLD, task breakdown) go into the
-KB as `plan`/`report` docs (under `docs/gitmark/plans/<feature>/` · `reviews/`) — typed,
-linked and linted like everything else. They are **historical**, though: dated snapshots
-of intent that nobody updates after the run, so KB `search` hides them by default
-(`--scope live`); reach them with `--scope all`.
+KB as `plan`/`report` docs (`docs/gitmark/plans/<feature>/` · `reviews/`) — dated snapshots
+of intent, kept as history (see the ontology on living vs historical docs).
 
 ## 5. Tasks and /goal — the agent writes the plan, the human accepts it
 The accumulated context (HLD + stack + decisions) is sliced into tasks per the
