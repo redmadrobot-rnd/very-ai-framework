@@ -5,56 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>srv-explore · admin</title>
 <style>
-  :root { color-scheme: light dark; --bd:#8883; --mut:#8886; }
+  :root {
+    --bg:#0d1117; --surface:#161b22; --surface2:#0f141a; --bd:#30363d;
+    --tx:#e6edf3; --mut:#8b949e; --acc:#2f81f7; --acc-h:#4b9bff;
+    --green:#3fb950; --red:#f85149; --amber:#d29922;
+    --radius:10px;
+  }
   * { box-sizing: border-box; }
-  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 1100px; }
-  h1 { font-size: 1.2rem; margin: 0 0 .2rem; }
-  h2 { font-size: 1rem; margin: 1.6rem 0 .5rem; }
-  .sub { color: var(--mut); margin: 0 0 1rem; }
-  .bar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
-  input, select, button { font: inherit; padding: .4rem .6rem; border: 1px solid var(--bd); border-radius: 6px; background: transparent; color: inherit; }
-  button { cursor: pointer; }
-  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
-  button.danger { border-color: #dc2626; color: #dc2626; }
-  table { border-collapse: collapse; width: 100%; margin-top: .3rem; }
-  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--bd); vertical-align: top; }
-  th { color: var(--mut); font-weight: 600; }
-  code, pre { font-family: ui-monospace, monospace; }
+  html { color-scheme: dark; }
+  body {
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; padding: 2rem 1.25rem 4rem; color: var(--tx);
+    background: radial-gradient(1200px 600px at 80% -10%, #1b2432 0%, var(--bg) 55%) fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .25rem; }
+  h1 { font-size: 1.15rem; font-weight: 650; margin: 0; letter-spacing: .2px; }
+  h1 .dot { color: var(--acc); }
+  .badge { font-size: .72rem; color: var(--mut); border: 1px solid var(--bd); border-radius: 999px; padding: .1rem .55rem; }
+  .sub { color: var(--mut); margin: 0 0 1.6rem; font-size: .9rem; }
+  h2 { font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--mut); font-weight: 600; margin: 2rem 0 .7rem; display: flex; align-items: center; gap: .5rem; }
+  h2 .rl { margin-left: auto; }
+
+  .card { background: var(--surface); border: 1px solid var(--bd); border-radius: var(--radius); padding: 1.1rem 1.2rem; box-shadow: 0 1px 0 #ffffff08 inset, 0 8px 24px #0006; }
+  .bar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+
+  label { color: var(--mut); font-size: .85rem; display: inline-flex; align-items: center; gap: .45rem; }
+  input, select {
+    font: inherit; padding: .5rem .7rem; border: 1px solid var(--bd); border-radius: 8px;
+    background: var(--surface2); color: var(--tx); outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  input::placeholder { color: #5b636d; }
+  input:focus, select:focus { border-color: var(--acc); box-shadow: 0 0 0 3px #2f81f733; }
+  button {
+    font: inherit; font-weight: 550; padding: .5rem .85rem; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--bd); background: #1d232c; color: var(--tx); transition: background .15s, border-color .15s, transform .05s;
+  }
+  button:hover { background: #232b35; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  button.primary:hover { background: var(--acc-h); }
+  button.danger { background: transparent; border-color: #5c2b2b; color: #ff7b72; }
+  button.danger:hover { background: #f851491a; border-color: var(--red); }
+  button.rl { padding: .2rem .5rem; font-size: .8rem; color: var(--mut); }
+
+  table { border-collapse: collapse; width: 100%; }
+  thead th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--mut); font-weight: 600; padding: .5rem .7rem; border-bottom: 1px solid var(--bd); }
+  tbody td { padding: .6rem .7rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: #ffffff05; }
+  .tbl-card { padding: .3rem .4rem; }
+
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .85em; }
+  code.id { color: #a5d6ff; background: #1f6feb1a; padding: .05rem .4rem; border-radius: 5px; }
   pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-  .tok { background: #16a34a22; border: 1px solid #16a34a; padding: .6rem .8rem; border-radius: 6px; margin: .5rem 0; }
-  .pill { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--bd); }
-  .running { color: #d97706; } .done { color: #16a34a; } .error { color: #dc2626; }
-  .err { color: #dc2626; }
+
+  .tok { background: #3fb9501a; border: 1px solid #2ea04366; border-radius: 8px; padding: .7rem .9rem; margin: .9rem 0 .2rem; }
+  .tok code { display: inline-block; margin-top: .35rem; color: #7ee787; word-break: break-all; font-size: .95em; }
+  .pill { font-size: .74rem; padding: .12rem .55rem; border-radius: 999px; border: 1px solid var(--bd); color: var(--mut); }
+  .st { font-size: .74rem; padding: .12rem .55rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; }
+  .running { color: var(--amber); border-color: #d2992255; background: #d299221a; }
+  .done { color: var(--green); border-color: #2ea04355; background: #3fb9501a; }
+  .error { color: var(--red); border-color: #f8514955; background: #f851491a; }
+  .err { color: #ff7b72; }
   .muted { color: var(--mut); }
-  details { margin: 0; } summary { cursor: pointer; }
-  .card { border: 1px solid var(--bd); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+
+  details summary { cursor: pointer; color: var(--acc); }
+  details summary:hover { color: var(--acc-h); }
+  details pre { margin-top: .5rem; padding: .7rem .8rem; background: var(--surface2); border: 1px solid var(--bd); border-radius: 8px; }
+
+  #audit { color: var(--mut); background: var(--surface2); max-height: 340px; overflow: auto; }
+  #authmsg { font-size: .85rem; }
+  .gap { margin-top: 1rem; }
 </style>
 </head>
 <body>
-<h1>srv-explore · admin</h1>
-<p class="sub">Управление доступом (токены/пользователи), история сессий, аудит. Инстанс: <b id="env">—</b></p>
+<div class="wrap">
+  <header>
+    <h1>srv-explore <span class="dot">·</span> admin</h1>
+    <span class="badge">env: <b id="env">—</b></span>
+  </header>
+  <p class="sub">Управление доступом, история сессий и аудит — без SSH к серверу.</p>
 
-<div class="bar card">
-  <label>Админ-токен <input id="admtok" type="password" placeholder="adm_…" size="34"></label>
-  <button class="primary" onclick="saveToken()">Войти</button>
-  <span id="authmsg" class="muted"></span>
-</div>
-
-<div id="app" style="display:none">
-  <h2>Токены доступа (пользователи)</h2>
-  <div class="bar">
-    <input id="lbl" placeholder="кому/зачем (label)" size="22">
-    <select id="tenv"></select>
-    <button class="primary" onclick="issue()">Выпустить токен</button>
+  <div class="card bar">
+    <label>Админ-токен <input id="admtok" type="password" placeholder="adm_…" size="32"></label>
+    <button class="primary" onclick="saveToken()">Войти</button>
+    <span id="authmsg" class="muted"></span>
   </div>
-  <div id="issued"></div>
-  <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>env</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
 
-  <h2>История сессий / монитор задач <button onclick="loadRuns()">⟳</button></h2>
-  <table id="runtbl"><thead><tr><th>время</th><th>кто</th><th>задача</th><th>статус</th><th>итог</th></tr></thead><tbody></tbody></table>
+  <div id="app" style="display:none">
+    <h2>Токены доступа <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— пользователи</span></h2>
+    <div class="card">
+      <div class="bar">
+        <input id="lbl" placeholder="кому / зачем (label)" size="24">
+        <select id="tenv"></select>
+        <button class="primary" onclick="issue()">Выпустить токен</button>
+      </div>
+      <div id="issued"></div>
+      <div class="gap tbl-card">
+        <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>env</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
 
-  <h2>Аудит команд <button onclick="loadAudit()">⟳</button></h2>
-  <pre id="audit" class="card muted">—</pre>
+    <h2>История сессий <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
+    <div class="card tbl-card">
+      <table id="runtbl"><thead><tr><th>время</th><th>кто</th><th>задача</th><th>статус</th><th>итог</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <h2>Аудит команд <span class="rl"><button class="rl" onclick="loadAudit()">⟳ обновить</button></span></h2>
+    <pre id="audit" class="card">—</pre>
+  </div>
 </div>
 
 <script>
@@ -99,7 +160,7 @@ async function loadTokens() {
   const tb = $("#toktbl tbody"); tb.innerHTML = "";
   for (const t of d.tokens) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><code>${esc(t.id)}</code></td><td>${esc(t.label)}</td><td>${esc(t.env)}</td><td class="muted">${esc(t.created)}</td>
+    tr.innerHTML = `<td><code class="id">${esc(t.id)}</code></td><td>${esc(t.label)}</td><td><span class="pill">${esc(t.env)}</span></td><td class="muted">${esc(t.created)}</td>
       <td><button class="danger" onclick="revoke('${esc(t.id)}')">отозвать</button></td>`;
     tb.appendChild(tr);
   }
@@ -131,7 +192,7 @@ async function loadRuns() {
       : (r.result ? `<details><summary>показать</summary><pre>${esc(r.result)}</pre></details>` : "—");
     const tr = document.createElement("tr");
     tr.innerHTML = `<td class="muted">${esc(r.started)}</td><td>${esc(r.label)}</td><td>${esc(r.task)}</td>
-      <td class="${esc(r.status)}">${esc(r.status)}</td><td>${out}</td>`;
+      <td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td><td>${out}</td>`;
     tb.appendChild(tr);
   }
   if (!d.runs.length) tb.innerHTML = `<tr><td colspan="5" class="muted">пока нет прогонов</td></tr>`;
