@@ -13,6 +13,14 @@ on:
         description: 'теги образов через пробел (напр. "<sha> latest")'
         required: true
         type: string
+      timeout_minutes:
+        description: 'бюджет времени сборки одного образа (тяжёлые ML/SPA — подними)'
+        type: number
+        default: 30
+      build_args:
+        description: 'docker build-args, по одному KEY=VALUE в строке; пусто = нет'
+        type: string
+        default: ''
 
 env:
   SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
@@ -20,7 +28,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: read
       packages: write
@@ -59,6 +67,7 @@ jobs:
         with:
           context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
           push: true
+          build-args: ${{ inputs.build_args }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           tags: ${{ steps.img.outputs.tags }}
