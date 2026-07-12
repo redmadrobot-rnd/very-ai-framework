@@ -57,13 +57,41 @@ jobs:
   build:
     needs: plan
     if: ${{ needs.plan.outputs.build != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    uses: ./.github/workflows/_build.yml
-    with:
-      services: ${{ needs.plan.outputs.build }}
-      tags: ${{ github.sha }} latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.plan.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: img
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: |
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:latest
 
   deploy-dev:
     needs: [plan, build]
@@ -73,27 +101,66 @@ jobs:
       ${{ always() && needs.plan.outputs.deploy != '[]'
           && needs.plan.result == 'success'
           && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
-    permissions:
-      contents: read
-      packages: read
-    # dev деплоим по :latest — единый тег для всего deploy-набора: и только что
-    # пересобранных сервисов, и незатронутых при редеплое конфига стека.
-    uses: ./.github/workflows/_deploy.yml
-    secrets: inherit
-    with:
-      environment: dev
-      tag: latest
-      services: ${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}
-
-  marker:
-    # refs/deploy/dev двигается только после успешного деплоя (см. комментарий в plan);
-    # deploy-dev скипнут/упал → job скипается по умолчанию needs-семантики.
-    needs: deploy-dev
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    environment: dev
     permissions:
-      contents: write
+      contents: write   # двигать маркер refs/deploy/dev после успешного деплоя
+      packages: read
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
     steps:
+      - name: Preflight — dev-конфиг задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -z "$miss" ] || { echo "::error::нет dev-конфига:$miss (Environment dev → Variables/Secrets)"; exit 1; }
+
       - uses: actions/checkout@v4
+
+      - name: Build .env (dev config)
+        env:
+          APP_DOTENV: ${{ vars.APP_DOTENV }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+        run: |
+          printf '%s\n' "$APP_DOTENV" > .env
+          if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> .env; fi
+
+      - name: Copy compose + deploy script + env
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
+          target: "/srv/deploy/${{ github.event.repository.name }}/dev"
+
+      - name: Deploy to dev (:latest)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
+        # dev деплоим по :latest — единый тег для всего deploy-набора: и только что
+        # пересобранных сервисов, и незатронутых при редеплое конфига стека.
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_PROJECT: ${{ github.event.repository.name }}
+          DEPLOY_SERVICES: ${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_SERVICES
+          script: >
+            bash "/srv/deploy/$DEPLOY_PROJECT/dev/.github/scripts/deploy.sh"
+            dev "$DEPLOY_REPO" latest "$DEPLOY_SERVICES"
+
       - name: Advance dev deploy marker
         run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/dev"
