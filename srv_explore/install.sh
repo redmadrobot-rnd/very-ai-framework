@@ -14,6 +14,7 @@ ENV_NAME="${SRV_EXPLORE_ENV:-dev}"
 APP_DIR=/opt/srv-explore
 CFG_DIR=/etc/srv-explore
 LOG_DIR=/var/log/srv-explore
+STATE_DIR=/var/lib/srv-explore   # writable: tokens.json + runs.jsonl (админ-UI пишет их)
 USER_NAME=srv-explore
 
 echo "==> srv-explore install (env=$ENV_NAME, src=$SRC)"
@@ -29,6 +30,8 @@ done
 # 2. каталоги
 install -d -o "$USER_NAME" -g "$USER_NAME" "$APP_DIR" "$LOG_DIR"
 install -d -m 0750 -o "$USER_NAME" -g "$USER_NAME" "$CFG_DIR"
+# state: сервис-юзер пишет сюда (токены/история); StateDirectory в юните тоже создаёт
+install -d -m 0750 -o "$USER_NAME" -g "$USER_NAME" "$STATE_DIR"
 
 # 3. код бандла целиком (guard/profiles/prompt/сервер — всё внутри srv_explore/)
 rm -rf "$APP_DIR/srv_explore"
@@ -64,14 +67,31 @@ SRV_EXPLORE_CWD=/
 SRV_EXPLORE_GUARD=$APP_DIR/srv_explore/guard.py
 SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
 SRV_EXPLORE_AUDIT=$LOG_DIR/explore.log
-SRV_EXPLORE_TOKENS=$CFG_DIR/tokens.json
+SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
+SRV_EXPLORE_RUNS=$STATE_DIR/runs.jsonl
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели для агента) — дописывает деплой, не коммитить.
+# SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
 EOF
   chmod 0640 "$CFG_DIR/env"
   chown root:"$USER_NAME" "$CFG_DIR/env"
 fi
-# tokens.json — читает сервис (по группе), пишет админ через CLI (issue/revoke)
-[ -f "$CFG_DIR/tokens.json" ] || { echo '[]' > "$CFG_DIR/tokens.json"; chmod 0640 "$CFG_DIR/tokens.json"; chown root:"$USER_NAME" "$CFG_DIR/tokens.json"; }
+
+# 5b. ключи, которых может не быть в уже существующем env (идемпотентно, без перезаписи)
+ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
+ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.jsonl"
+
+# 5c. админ-токен /admin — генерим ОДИН раз (переустановка не трогает выданный)
+if ! grep -q "^SRV_EXPLORE_ADMIN_TOKEN=" "$CFG_DIR/env"; then
+  ADMIN_TOKEN="adm_$("$APP_DIR/venv/bin/python" -c 'import secrets;print(secrets.token_urlsafe(32))')"
+  printf 'SRV_EXPLORE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN" >> "$CFG_DIR/env"
+  echo "==> админ-токен /admin сгенерирован (сохрани, показывается один раз):"
+  echo "    $ADMIN_TOKEN"
+fi
+
+# tokens.json — единственный владелец сервис-юзер (пишет и админ-UI, и CLI от sudo -u)
+[ -f "$STATE_DIR/tokens.json" ] || { echo '[]' > "$STATE_DIR/tokens.json"; }
+chmod 0640 "$STATE_DIR/tokens.json"
+chown -R "$USER_NAME:$USER_NAME" "$STATE_DIR"
 
 # 6. systemd-юнит
 install -m 0644 "$APP_DIR/srv_explore/systemd/srv-explore.service" /etc/systemd/system/srv-explore.service
@@ -80,5 +100,6 @@ systemctl enable srv-explore.service
 systemctl restart srv-explore.service
 
 echo "==> готово. Статус: systemctl status srv-explore --no-pager"
-echo "    Выдать токен (от root — сервис файл только читает):"
-echo "    cd $APP_DIR && sudo venv/bin/python -m srv_explore.token_store --store $CFG_DIR/tokens.json issue --label <кто> --env $ENV_NAME"
+echo "    Управление токенами: открой http://<host>:<port>/admin (админ-токен выше)."
+echo "    Либо CLI от сервис-юзера:"
+echo "    sudo -u $USER_NAME $APP_DIR/venv/bin/python -m srv_explore.token_store --store $STATE_DIR/tokens.json issue --label <кто> --env $ENV_NAME"

@@ -16,15 +16,17 @@ ro OS-пользователем; единственный компонент в
 ## Состав бандла (всё в этом каталоге)
 
 - `mcp_server.py` — remote MCP (streamable HTTP): tools `srv_explore(task)` и
-  `srv_explore_status(job_id)` (job-id + poll). Внутри — Claude Agent SDK headless;
-  каждая Bash-команда агента проходит через `guard.py`. `curl`/`ssh` off
-  (`SRV_EXPLORE_NO_NETWORK`), egress закрыт.
+  `srv_explore_status(job_id)` (job-id + poll) + `/admin` (за админ-токеном). Внутри —
+  Claude Agent SDK headless; каждая Bash-команда проходит через `guard.py`. `curl`/`ssh`
+  off (`SRV_EXPLORE_NO_NETWORK`), egress закрыт.
 - `guard.py` + `profiles/` — PreToolUse-гард (default-deny allowlist) и профили
   (shell + БД: postgres/mongo/redis/rabbitmq). Единый источник правды политики «только чтение».
+- `admin.html` — self-contained страница `/admin`: выпуск/отзыв токенов (пользователи),
+  история сессий + монитор задач, просмотр аудита. Гейт — `SRV_EXPLORE_ADMIN_TOKEN`.
 - `agent_prompt.md` — системный промпт readonly-агента (правила + формат отчёта).
-- `token_store.py` (+ CLI) — bearer-токены: админ выдаёт/отзывает, на сервере только `sha256`.
+- `token_store.py` (+ CLI) — bearer-токены: выдаёт/отзывает админ (UI или CLI), на
+  сервере только `sha256`. `run_store.py` — история прогонов (JSONL) для `/admin`.
 - `install.sh` + `systemd/srv-explore.service` + `requirements.txt` — установка на хост.
-- `docs/` — концепция и ресёрч.
 
 Что держит «только чтение»: readonly-роль БД (фундамент) + `guard.py` server-side (граница,
 не defense) + `permission_mode=dontAsk` + `ProtectSystem=strict` в юните + bearer-токен.
@@ -48,12 +50,19 @@ sudo systemctl restart srv-explore
 
 ## Выдача доступа инженеру
 
-Токен генерит и выдаёт **админ** (не джобы) — от root, сервис файл только читает:
+Токены выдаёт/отзывает **админ**. `install.sh` при первой установке печатает
+одноразовый **админ-токен** (`adm_…`) — им гейтится `/admin`.
+
+Основной путь — веб-панель `/admin` (тем же `<URL>`, что и MCP): ввести админ-токен →
+«Выпустить токен» (label = кому/зачем, env) → скопировать показанный **один раз**
+`srvx_…` и отдать инженеру. Там же — отзыв, список, история сессий, аудит.
+
+CLI как fallback (от сервис-юзера, чтобы владение `tokens.json` не уезжало на root):
 
 ```bash
-cd /opt/srv-explore && sudo venv/bin/python -m srv_explore.token_store \
-  --store /etc/srv-explore/tokens.json issue --label alice --env dev
-# печатает токен ОДИН раз — отдать инженеру; отозвать: ... revoke <id>; список: ... list
+sudo -u srv-explore /opt/srv-explore/venv/bin/python -m srv_explore.token_store \
+  --store /var/lib/srv-explore/tokens.json issue --label alice --env dev
+# отозвать: ... revoke <id>; список: ... list
 ```
 
 Инженер подключает remote MCP у себя (см. скилл `srv-explore`):
@@ -69,8 +78,10 @@ claude mcp add --transport http srv-explore <URL>/mcp \
 
 `SRV_EXPLORE_ENV` (dev|prod — идентичность инстанса, к ней привязан токен) ·
 `SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind) ·
-`SRV_EXPLORE_GUARD`/`PROMPT`/`AUDIT`/`TOKENS`/`CWD` · `CLAUDE_CODE_OAUTH_TOKEN`
-(авторизация модели, секрет, пишет деплой).
+`SRV_EXPLORE_GUARD`/`PROMPT`/`AUDIT`/`CWD` · `SRV_EXPLORE_TOKENS`/`SRV_EXPLORE_RUNS`
+(хэши токенов и история — в `/var/lib/srv-explore`, единственный писатель = сервис-юзер) ·
+`CLAUDE_CODE_OAUTH_TOKEN` (авторизация модели, секрет, пишет деплой) ·
+`SRV_EXPLORE_ADMIN_TOKEN` (гейт `/admin`; генерит `install.sh` один раз).
 
 Как сервис доступен инженеру (TLS-прокси, VPN, локальный проброс, …) — задача
 окружения, вне бандла. Бандлу нужен лишь достижимый `<URL>` + токен.

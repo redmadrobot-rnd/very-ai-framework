@@ -83,6 +83,21 @@ def test_persistence_across_reload(store_path):
     assert rec.label == "alice"
 
 
+def test_verify_reloads_external_changes(store_path):
+    # Админ-UI и раннер — разные объекты TokenStore на один файл. verify() перечитывает
+    # файл, чтобы выдача/отзыв через UI действовали без рестарта сервиса.
+    runner = TokenStore(store_path)
+    admin = TokenStore(store_path)
+
+    _, token = admin.issue("alice", "dev")
+    # runner создан ДО выдачи — но verify перечитает файл и увидит токен
+    assert runner.verify(token, env="dev") is not None
+
+    rec = admin.list()[0]
+    admin.revoke(rec.id)
+    assert runner.verify(token, env="dev") is None
+
+
 def test_issue_rejects_bad_env(store_path):
     store = TokenStore(store_path)
     with pytest.raises(ValueError):

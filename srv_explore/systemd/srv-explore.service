@@ -10,6 +10,9 @@ Group=srv-explore
 # docker (читать docker ps/logs/inspect), systemd-journal (journalctl), adm (/var/log)
 SupplementaryGroups=docker systemd-journal adm
 EnvironmentFile=/etc/srv-explore/env
+# HOME в writable StateDirectory: у ro-юзера нет своего /home (ProtectHome), а bundled
+# claude CLI и shell агента требуют writable HOME (иначе bash не стартует).
+Environment=HOME=%S/srv-explore
 WorkingDirectory=/opt/srv-explore
 ExecStart=/opt/srv-explore/venv/bin/python -m srv_explore.mcp_server
 Restart=on-failure
@@ -20,7 +23,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-# Пишем только аудит-лог; всё остальное read-only.
+# Пишем только состояние (токены/история) и аудит-лог; всё остальное read-only.
+StateDirectory=srv-explore
 ReadWritePaths=/var/log/srv-explore
 
 [Install]

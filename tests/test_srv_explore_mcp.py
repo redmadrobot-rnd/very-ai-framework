@@ -47,6 +47,22 @@ def test_authorize_rejects_unknown_and_missing(tmp_path):
     assert mcp_server.authorize(None, store, "dev") is None
 
 
+# --- admin-авторизация --------------------------------------------------------
+
+
+def test_admin_disabled_without_env(monkeypatch):
+    monkeypatch.delenv("SRV_EXPLORE_ADMIN_TOKEN", raising=False)
+    assert mcp_server.admin_authorized("Bearer adm_whatever") is False
+
+
+def test_admin_authorized_matches(monkeypatch):
+    monkeypatch.setenv("SRV_EXPLORE_ADMIN_TOKEN", "adm_secret")
+    assert mcp_server.admin_authorized("Bearer adm_secret") is True
+    assert mcp_server.admin_authorized("Bearer adm_wrong") is False
+    assert mcp_server.admin_authorized(None) is False
+    assert mcp_server.admin_authorized("adm_secret") is False  # без Bearer
+
+
 # --- мост к guard.py ----------------------------------------------------------
 
 

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 TOKEN_PREFIX = "srvx_"
-DEFAULT_STORE = "/etc/srv-explore/tokens.json"
+DEFAULT_STORE = "/var/lib/srv-explore/tokens.json"
 VALID_ENVS = ("dev", "prod")
 
 
@@ -59,14 +59,20 @@ class TokenStore:
         raw = json.loads(self.path.read_text(encoding="utf-8") or "[]")
         self._records = [TokenRecord(**r) for r in raw]
 
+    def reload(self) -> None:
+        """Перечитать файл, не падая на битом содержимом (для рантайма сервиса)."""
+        try:
+            self._load()
+        except (OSError, ValueError, TypeError):
+            pass
+
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = json.dumps(
             [asdict(r) for r in self._records], ensure_ascii=False, indent=2
         )
-        # Файл с хэшами токенов (не сами токены). 0640: владелец пишет, группа
-        # (сервис-юзер) читает. Админ выдаёт от root, сервис читает по группе —
-        # 0600 сломало бы чтение сервисом.
+        # Файл с хэшами токенов (не сами токены). Один владелец — сервис-юзер
+        # (StateDirectory): и админ-UI, и CLI (от sudo -u srv-explore) пишут им же.
         self.path.write_text(data + "\n", encoding="utf-8")
         try:
             self.path.chmod(0o640)
@@ -115,6 +121,7 @@ class TokenStore:
         """
         if not token:
             return None
+        self.reload()  # выдача/отзыв через админ-UI видны без рестарта сервиса
         digest = token_hash(token)
         for r in self._records:
             if secrets.compare_digest(r.sha256, digest):

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>srv-explore · admin</title>
+<style>
+  :root { color-scheme: light dark; --bd:#8883; --mut:#8886; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 1100px; }
+  h1 { font-size: 1.2rem; margin: 0 0 .2rem; }
+  h2 { font-size: 1rem; margin: 1.6rem 0 .5rem; }
+  .sub { color: var(--mut); margin: 0 0 1rem; }
+  .bar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  input, select, button { font: inherit; padding: .4rem .6rem; border: 1px solid var(--bd); border-radius: 6px; background: transparent; color: inherit; }
+  button { cursor: pointer; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.danger { border-color: #dc2626; color: #dc2626; }
+  table { border-collapse: collapse; width: 100%; margin-top: .3rem; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--bd); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; }
+  code, pre { font-family: ui-monospace, monospace; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+  .tok { background: #16a34a22; border: 1px solid #16a34a; padding: .6rem .8rem; border-radius: 6px; margin: .5rem 0; }
+  .pill { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--bd); }
+  .running { color: #d97706; } .done { color: #16a34a; } .error { color: #dc2626; }
+  .err { color: #dc2626; }
+  .muted { color: var(--mut); }
+  details { margin: 0; } summary { cursor: pointer; }
+  .card { border: 1px solid var(--bd); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<h1>srv-explore · admin</h1>
+<p class="sub">Управление доступом (токены/пользователи), история сессий, аудит. Инстанс: <b id="env">—</b></p>
+
+<div class="bar card">
+  <label>Админ-токен <input id="admtok" type="password" placeholder="adm_…" size="34"></label>
+  <button class="primary" onclick="saveToken()">Войти</button>
+  <span id="authmsg" class="muted"></span>
+</div>
+
+<div id="app" style="display:none">
+  <h2>Токены доступа (пользователи)</h2>
+  <div class="bar">
+    <input id="lbl" placeholder="кому/зачем (label)" size="22">
+    <select id="tenv"></select>
+    <button class="primary" onclick="issue()">Выпустить токен</button>
+  </div>
+  <div id="issued"></div>
+  <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>env</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
+
+  <h2>История сессий / монитор задач <button onclick="loadRuns()">⟳</button></h2>
+  <table id="runtbl"><thead><tr><th>время</th><th>кто</th><th>задача</th><th>статус</th><th>итог</th></tr></thead><tbody></tbody></table>
+
+  <h2>Аудит команд <button onclick="loadAudit()">⟳</button></h2>
+  <pre id="audit" class="card muted">—</pre>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+function tok() { return sessionStorage.getItem("admtok") || ""; }
+function hdr() { return { "Authorization": "Bearer " + tok(), "Content-Type": "application/json" }; }
+function esc(s) { return (s ?? "").toString().replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: hdr() }, opts || {}));
+  if (r.status === 401) throw new Error("неверный админ-токен");
+  return r;
+}
+
+function saveToken() {
+  sessionStorage.setItem("admtok", $("#admtok").value.trim());
+  boot();
+}
+
+async function boot() {
+  if (!tok()) { $("#authmsg").textContent = "введи админ-токен"; return; }
+  try {
+    await loadTokens();
+    $("#app").style.display = "";
+    $("#authmsg").textContent = "";
+    $("#authmsg").className = "muted";
+    loadRuns(); loadAudit();
+  } catch (e) {
+    $("#app").style.display = "none";
+    $("#authmsg").textContent = e.message;
+    $("#authmsg").className = "err";
+  }
+}
+
+async function loadTokens() {
+  const d = await (await api("/admin/api/tokens")).json();
+  $("#env").textContent = d.env;
+  const sel = $("#tenv");
+  if (!sel.options.length) {
+    for (const e of ["dev", "prod"]) { const o = document.createElement("option"); o.value = o.textContent = e; if (e === d.env) o.selected = true; sel.appendChild(o); }
+  }
+  const tb = $("#toktbl tbody"); tb.innerHTML = "";
+  for (const t of d.tokens) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><code>${esc(t.id)}</code></td><td>${esc(t.label)}</td><td>${esc(t.env)}</td><td class="muted">${esc(t.created)}</td>
+      <td><button class="danger" onclick="revoke('${esc(t.id)}')">отозвать</button></td>`;
+    tb.appendChild(tr);
+  }
+  if (!d.tokens.length) tb.innerHTML = `<tr><td colspan="5" class="muted">нет выданных токенов</td></tr>`;
+}
+
+async function issue() {
+  const label = $("#lbl").value.trim();
+  if (!label) { alert("укажи label"); return; }
+  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label, env: $("#tenv").value }) });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || "ошибка"); return; }
+  $("#lbl").value = "";
+  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> (${esc(d.record.env)}) — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code></div>`;
+  loadTokens();
+}
+
+async function revoke(id) {
+  if (!confirm("Отозвать токен " + id + "?")) return;
+  await api("/admin/api/tokens/" + encodeURIComponent(id) + "/revoke", { method: "POST" });
+  loadTokens();
+}
+
+async function loadRuns() {
+  const d = await (await api("/admin/api/runs")).json();
+  const tb = $("#runtbl tbody"); tb.innerHTML = "";
+  for (const r of d.runs) {
+    const out = r.status === "error" ? `<span class="err">${esc(r.error)}</span>`
+      : (r.result ? `<details><summary>показать</summary><pre>${esc(r.result)}</pre></details>` : "—");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="muted">${esc(r.started)}</td><td>${esc(r.label)}</td><td>${esc(r.task)}</td>
+      <td class="${esc(r.status)}">${esc(r.status)}</td><td>${out}</td>`;
+    tb.appendChild(tr);
+  }
+  if (!d.runs.length) tb.innerHTML = `<tr><td colspan="5" class="muted">пока нет прогонов</td></tr>`;
+}
+
+async function loadAudit() {
+  const d = await (await api("/admin/api/audit")).json();
+  $("#audit").textContent = d.lines.length ? d.lines.join("\n") : "аудит пуст";
+}
+
+$("#admtok").addEventListener("keydown", e => { if (e.key === "Enter") saveToken(); });
+if (tok()) { $("#admtok").value = tok(); boot(); }
+</script>
+</body>
+</html>
