@@ -82,9 +82,9 @@ object (no markdown, no prose, no code fences). Schema:
 }
 
 Method — be thorough, not quick. A good review finds MANY issues, not one or two.
-The full PR branch is checked out; the diff shows WHAT changed but not its consequences.
-For every changed file and every added/modified function you MUST investigate beyond the
-diff using the checked-out code:
+The diff shows WHAT changed but not its consequences. For every changed file and every
+added/modified function you MUST investigate beyond the diff (using the PR code if it is
+available to you — see the context note above; otherwise reason from the diff itself):
   - Trace callers and call sites: is a newly added call on a hot path (per-request,
     per message, inside a loop)? Does it add I/O (DB query, network, S3, file read)
     that runs even when unnecessary? Flag added latency/cost on hot paths.
@@ -378,9 +378,15 @@ def main() -> None:
         codex_argv += ["--cd", pr_cwd]
         prompt = PR_CONTEXT_NOTE.format(base=base) + prompt
     else:
-        # worktree не встал → codex не может достать дифф git'ом; вставляем
-        # патч (до лимита).
-        prompt += "\nDiff:\n" + prompt_diff
+        # worktree не встал → codex работает из базового чекаута, НЕ из кода PR.
+        # Файлы на диске = base-ветка; единственный источник изменений PR — патч
+        # ниже (до лимита). Прямо предупреждаем, чтобы codex не принял on-disk за PR.
+        prompt += (
+            "\nNo PR working tree is available: the files on disk are the BASE "
+            "branch, not this PR. The patch below is the ONLY source of the PR's "
+            "changes — review from it, and treat on-disk files as base context "
+            "only.\n\nDiff:\n" + prompt_diff
+        )
     try:
         raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
     except Exception as exc:  # noqa: BLE001 — сбой codex не должен вешать заглушку
