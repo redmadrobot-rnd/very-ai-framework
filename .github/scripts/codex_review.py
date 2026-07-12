@@ -75,9 +75,10 @@ object (no markdown, no prose, no code fences). Schema:
 }
 
 Method — be thorough, not quick. A good review finds MANY issues, not one or two.
-The diff shows WHAT changed but not its consequences. For every changed file and every
-added/modified function you MUST investigate beyond the diff (using the PR code if it is
-available to you — see the context note above; otherwise reason from the diff itself):
+The changed-file list shows WHAT changed but not its consequences. The PR branch is
+checked out in your working directory (see the context note above) — read the actual
+code with git. For every changed file and every added/modified function you MUST
+investigate beyond the immediate change:
   - Trace callers and call sites: is a newly added call on a hot path (per-request,
     per message, inside a loop)? Does it add I/O (DB query, network, S3, file read)
     that runs even when unnecessary? Flag added latency/cost on hot paths.
@@ -315,15 +316,22 @@ def main() -> None:
         ":(exclude)**/*.snap",
     ]
     diff_range = f"origin/{base}...FETCH_HEAD"
-    # FULL diff — for anchoring inline comments (commentable_lines). It is NOT
-    # sent to the model whole; parsed locally, so anchoring works for any line.
-    full_diff = run("git", "diff", diff_range, "--", *diff_pathspec).strip()
-    if not full_diff:
-        finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
-        return
-    # --stat — full changed-file list + churn. Cheap, NEVER truncated: even with a
-    # trimmed patch the model still knows the whole scope and reads files itself.
-    diff_stat = run("git", "diff", "--stat", diff_range, "--", *diff_pathspec).strip()
+    # FULL diff — for anchoring inline comments (commentable_lines); NOT sent to
+    # the model, only parsed locally. --stat is the scope map that IS sent (the
+    # patch itself isn't pasted; codex reads the code from the worktree).
+    try:
+        full_diff = run("git", "diff", diff_range, "--", *diff_pathspec).strip()
+        if not full_diff:
+            finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
+            return
+        diff_stat = run(
+            "git", "diff", "--stat", diff_range, "--", *diff_pathspec
+        ).strip()
+    except RuntimeError as exc:
+        # git diff упал после успешного fetch (редко) — сообщаем через finalize,
+        # чтобы не оставить заглушку «⏳» висеть.
+        finalize(f"🤖 Codex review: git diff упал.\n\n```\n{str(exc)[:1000]}\n```")
+        sys.exit(f"git diff failed: {exc}")
 
     # codex handles untrusted PR code. It needs no token — strip GH_TOKEN from the
     # subprocess env so the secret isn't exposed to a tool-capable CLI.
