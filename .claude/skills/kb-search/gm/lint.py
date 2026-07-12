@@ -10,8 +10,10 @@ from pathlib import Path
 from .core import KB_DIR, LINK_RE, iter_md, nfc, resolve_link
 
 # Инфра БЗ — файлы для работы с базой, а не объекты онтологии; освобождены от node_type
-# (I1). README.md — индекс папки (тип index — по желанию), ontology.md — описание модели.
-INFRA_FILES = ("README.md", "ontology.md")
+# (I1). README.md — индекс папки (в любой папке, тип index — по желанию); ontology.md —
+# описание модели, но только в корне БЗ (вложенный ontology.md — обычный документ).
+def _is_infra(rel: str) -> bool:
+    return Path(rel).name == "README.md" or rel == f"{KB_DIR}/ontology.md"
 
 # Инварианты онтологии: код → описание. Единый источник истины — отсюда же
 # берётся справка CLI. Сами проверки реализованы в cmd_lint и помечают находки кодом.
@@ -234,7 +236,7 @@ def cmd_lint(root: Path, paths: list | None = None) -> dict:
         # I1 — любой док БЗ без frontmatter/типа (кроме инфра-файлов) — объект онтологии
         # обязан быть типизирован, иначе он не классифицируется (в т.ч. live/historical).
         if not fm or not nt:
-            if Path(rel).name not in INFRA_FILES:
+            if not _is_infra(rel):
                 issues.append(("ERR", "I1", rel, 1, "нет frontmatter с node_type"))
             continue
         # I2 — значения в словарях (service не контролируется — свободное поле)

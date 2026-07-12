@@ -31,8 +31,9 @@ Each document has exactly one `node_type` — its "table" in the ontology.
 > The KB lives under `docs/gitmark/` (so the rest of `docs/` stays free for non-KB
 > material). All folders below are relative to it; only this tree is scanned/linted.
 
-**Living vs historical.** All docs stay in the ontology — typed, linked, linted, on the
-graph. But `plan` and `report` are **historical**: dated snapshots (intent before build,
+**Living vs historical.** All docs stay in the ontology — typed, linted, on the graph
+(linked where the type is load-bearing; see I3). But `plan` and `report` are **historical**:
+dated snapshots (intent before build,
 a one-off audit) that go stale — a `plan` diverges from what shipped, an audit's relevance
 fades. So `search` hides them by default (`--scope live`); reach them with `--scope all`
 (or `--scope history` for only those). Everything else is **living knowledge** and must stay

@@ -8,7 +8,8 @@ Compose or update a KB document for: `$ARGUMENTS`
 Follow the `kb-maintain` skill (ontology over code):
 
 1. **Search first** — `python3 .claude/skills/kb-search/gitmark.py search "$ARGUMENTS"`.
-   If the topic already exists → **edit that doc**, don't create a second one.
+   If the topic already exists → **edit that doc**, don't create a second one. For a
+   `plan`/`report` add `--scope all` (default search hides historical docs → missed dupes).
 2. **Pick a `node_type`** — `service` · `reference` · `runbook` · `gotcha` · `decision` ·
    `plan` · `guide` · `report` · `index` (unsure → spec = `reference`, how-to = `guide`)
    and the **right folder** (all under `docs/gitmark/`: service → `docs/gitmark/services/<svc>/`,

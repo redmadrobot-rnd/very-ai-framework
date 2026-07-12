@@ -20,6 +20,8 @@ links — inspired by Palantir Foundry/Gotham, but for documentation over code).
 python3 .claude/skills/kb-search/gitmark.py search "<topic>"
 ```
 If the topic already exists — **edit the existing doc**, don't create a second one.
+Adding/updating a `plan` or `report`? Add `--scope all` — default search hides historical
+docs, so without it the duplicate check misses an existing plan/report.
 
 ## When ADDING knowledge (CREATE)
 
