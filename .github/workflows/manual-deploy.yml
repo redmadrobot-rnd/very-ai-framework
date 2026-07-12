@@ -79,41 +79,13 @@ jobs:
   build:
     needs: discover
     if: ${{ inputs.build == true && needs.discover.outputs.services != '[]' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJson(needs.discover.outputs.services) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - id: img
-        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
-          push: true
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-          tags: ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ needs.discover.outputs.tag }}
+    uses: ./.github/workflows/_build.yml
+    with:
+      services: ${{ needs.discover.outputs.services }}
+      tags: ${{ needs.discover.outputs.tag }}
 
   deploy:
     needs: [discover, build]
@@ -124,48 +96,12 @@ jobs:
           && needs.discover.result == 'success'
           && needs.discover.outputs.services != '[]'
           && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: ${{ inputs.environment }}
     permissions:
       contents: read
       packages: read
-    concurrency:
-      group: deploy-${{ inputs.environment }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build .env (${{ inputs.environment }} config)
-        env:
-          APP_DOTENV: ${{ vars.APP_DOTENV }}
-          APP_SECRET: ${{ secrets.APP_SECRET }}
-        run: |
-          printf '%s\n' "$APP_DOTENV" > .env
-          if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> .env; fi
-      - name: Copy compose + deploy script + env
-        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
-        with:
-          host: ${{ vars.SSH_HOST }}
-          username: ${{ vars.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
-          target: "/srv/deploy/${{ github.event.repository.name }}/${{ inputs.environment }}"
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
-          DEPLOY_REPO: ${{ github.repository }}
-          DEPLOY_PROJECT: ${{ github.event.repository.name }}
-          DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
-          DEPLOY_SERVICES: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
-          COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
-        with:
-          host: ${{ vars.SSH_HOST }}
-          username: ${{ vars.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICES,COMPOSE_PROFILES
-          script: >
-            bash "/srv/deploy/$DEPLOY_PROJECT/$DEPLOY_ENV/.github/scripts/deploy.sh"
-            "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICES"
+    uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
+    with:
+      environment: ${{ inputs.environment }}
+      tag: ${{ needs.discover.outputs.tag }}
+      services: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
