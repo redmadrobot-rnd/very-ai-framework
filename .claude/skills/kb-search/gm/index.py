@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import VERSION
-from .core import DB_REL, area_of, chunk_md, iter_md, title_of
+from .core import DB_REL, area_of, chunk_md, iter_md, node_type_of, title_of
 
 
 def _has_trigram(con) -> bool:
@@ -39,11 +39,13 @@ def cmd_index(root: Path) -> dict:
     if has_tri:
         con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS tri USING "
                     "fts5(path UNINDEXED, heading, lineno UNINDEXED, body, tokenize='trigram')")
-    con.execute("CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, title TEXT, "
-                "area TEXT, size INT, chunks INT)")
+    # files пересоздаём (DROP): схема пополнилась node_type — CREATE IF NOT EXISTS
+    # не мигрирует уже существующую таблицу в .gitmark/index.db.
+    con.execute("DROP TABLE IF EXISTS files")
+    con.execute("CREATE TABLE files(path TEXT PRIMARY KEY, title TEXT, "
+                "area TEXT, size INT, chunks INT, node_type TEXT)")
     con.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
-    for t in ("fts", "files"):
-        con.execute(f"DELETE FROM {t}")
+    con.execute("DELETE FROM fts")
     if has_tri:
         con.execute("DELETE FROM tri")
 
@@ -57,7 +59,7 @@ def cmd_index(root: Path) -> dict:
 
     nchunks = 0
     for rel, text in files.items():
-        title, area = title_of(text, rel), area_of(rel)
+        title, area, nt = title_of(text, rel), area_of(rel), node_type_of(text)
         chs = chunk_md(text)
         for line, heading, body in chs:
             con.execute("INSERT INTO fts(path,heading,lineno,body) VALUES(?,?,?,?)",
@@ -66,8 +68,8 @@ def cmd_index(root: Path) -> dict:
                 con.execute("INSERT INTO tri(path,heading,lineno,body) VALUES(?,?,?,?)",
                             (rel, heading, str(line), body))
         nchunks += len(chs)
-        con.execute("INSERT INTO files VALUES(?,?,?,?,?)",
-                    (rel, title, area, len(text.encode("utf-8")), len(chs)))
+        con.execute("INSERT INTO files VALUES(?,?,?,?,?,?)",
+                    (rel, title, area, len(text.encode("utf-8")), len(chs), nt))
     con.execute("INSERT OR REPLACE INTO meta VALUES('trigram', ?)", ("1" if has_tri else "0",))
     con.execute("INSERT OR REPLACE INTO meta VALUES('version', ?)", (VERSION,))
     con.commit()

@@ -7,15 +7,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .core import KB_DIR, LINK_RE, iter_md, kb_subpath, nfc, resolve_link
+from .core import KB_DIR, LINK_RE, iter_md, nfc, resolve_link
 
-# Подкаталоги БЗ, где документ считается «несущим» (требует frontmatter с node_type).
-BEARING_DIRS = ("reference", "ops", "plans", "decisions", "services")
+# Инфра БЗ — файлы для работы с базой, а не объекты онтологии; освобождены от node_type
+# (I1). README.md — индекс папки (в любой папке, тип index — по желанию); ontology.md —
+# описание модели, но только в корне БЗ (вложенный ontology.md — обычный документ).
+def _is_infra(rel: str) -> bool:
+    return Path(rel).name == "README.md" or rel == f"{KB_DIR}/ontology.md"
 
 # Инварианты онтологии: код → описание. Единый источник истины — отсюда же
 # берётся справка CLI. Сами проверки реализованы в cmd_lint и помечают находки кодом.
 INVARIANTS = {
-    "I1": "несущий документ имеет frontmatter с валидным node_type",
+    "I1": "каждый док БЗ (кроме инфра README/ontology) имеет frontmatter с валидным node_type",
     "I2": "node_type / status — в своих словарях",
     "I3": "нет сирот (несущий тип имеет ≥1 входящую или исходящую связь)",
     "I4": "нет битых md-ссылок",
@@ -26,7 +29,7 @@ INVARIANTS = {
 # Контролируемые словари (фиксированы — ядро модели). `service` НЕ контролируется:
 # это свободное поле, агент-куратор сам решает, к какому компоненту отнести документ.
 NODE_TYPES = {"service", "reference", "runbook", "gotcha", "decision",
-              "plan", "guide", "report", "index", "memory"}
+              "plan", "guide", "report", "index"}
 
 STATUSES = {"active", "draft", "deprecated", "archived"}
 
@@ -230,10 +233,10 @@ def cmd_lint(root: Path, paths: list | None = None) -> dict:
         fm = fm_cache.get(rel)
         text = text_cache.get(rel, "")
         nt = (fm or {}).get("node_type")
-        # I1 — несущий документ без frontmatter/типа
-        looks_bearing = kb_subpath(rel).split("/")[0] in BEARING_DIRS
+        # I1 — любой док БЗ без frontmatter/типа (кроме инфра-файлов) — объект онтологии
+        # обязан быть типизирован, иначе он не классифицируется (в т.ч. live/historical).
         if not fm or not nt:
-            if looks_bearing and Path(rel).name != "README.md":
+            if not _is_infra(rel):
                 issues.append(("ERR", "I1", rel, 1, "нет frontmatter с node_type"))
             continue
         # I2 — значения в словарях (service не контролируется — свободное поле)

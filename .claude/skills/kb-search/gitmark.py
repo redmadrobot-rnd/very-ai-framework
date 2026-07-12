@@ -3,7 +3,8 @@
 
 Команды:
     gitmark index  [--root .]                построить/обновить индекс
-    gitmark search "<q>" [-k 8] [--json]     искать (bm25 ∪ trigram ∪ fuzzy)
+    gitmark search "<q>" [-k 8] [--json] [--scope live|all|history]  искать
+                                             (bm25 ∪ trigram ∪ fuzzy; scope — какие доки)
     gitmark stat                             статистика индекса/БЗ
     gitmark lint  [paths…] [--strict] [--json]  проверить онтологию (I1–I6)
     gitmark version
@@ -72,6 +73,9 @@ def main(argv=None):
     sp.add_argument("query")
     sp.add_argument("-k", type=int, default=8)
     sp.add_argument("--json", action="store_true")
+    sp.add_argument("--scope", choices=["live", "all", "history"], default="live",
+                    help="какие доки искать: live — без историч. (plan/report, деф.); "
+                         "all — все; history — только историч.")
     sub.add_parser("stat", help="статистика")
     lp = sub.add_parser(
         "lint", help="проверить онтологию",
@@ -89,7 +93,7 @@ def main(argv=None):
         print(f"✓ index: {r['files']} файлов · {r['chunks']} чанков · "
               f"trigram={'on' if r['trigram'] else 'OFF'} → {r['db']}")
     elif a.cmd == "search":
-        _print_search(cmd_search(root, a.query, a.k), a.json)
+        _print_search(cmd_search(root, a.query, a.k, a.scope), a.json)
     elif a.cmd == "stat":
         s = cmd_stat(root)
         if not s.get("indexed"):

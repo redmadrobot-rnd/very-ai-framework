@@ -8,7 +8,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from .core import DB_REL
+from .core import DB_REL, HISTORICAL_TYPES
 
 WORD_RE = re.compile(r"[\w\-]+", re.UNICODE)
 
@@ -39,12 +39,40 @@ def _fuzzy_phrases(s: str) -> list:
     return wins
 
 
-def cmd_search(root: Path, query: str, k: int = 8) -> list:
+def cmd_search(root: Path, query: str, k: int = 8, scope: str = "live") -> list:
+    """Искать по индексу. scope: live — без историч. типов (plan/report), history —
+    только они, all — всё. Классификация — по колонке files.node_type."""
     db = root / DB_REL
     if not db.exists():
         raise SystemExit("Индекс не найден — запусти `gitmark index`")
     con = sqlite3.connect(db)
     has_tri = (con.execute("SELECT v FROM meta WHERE k='trigram'").fetchone() or ("0",))[0] == "1"
+
+    # Индекс до этого PR не знает node_type — фильтр по scope невозможен, молча
+    # деградировать нельзя (live покажет историч.). Требуем пересборку.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(files)")}
+    if "node_type" not in cols:
+        con.close()
+        raise SystemExit("Индекс устарел (нет node_type) — пересобери: `gitmark index`")
+
+    # Пути историч. доков — для фильтра по scope. Фильтр толкаем в SQL (WHERE по
+    # UNINDEXED-колонке path), чтобы LIMIT в бэкендах применялся уже после отбора
+    # по scope — иначе in-scope хиты могут не долезть до окна k*N.
+    hist: set = set()
+    if scope != "all" and HISTORICAL_TYPES:
+        ph = ",".join("?" * len(HISTORICAL_TYPES))
+        hist = {p for (p,) in con.execute(
+            f"SELECT path FROM files WHERE node_type IN ({ph})",
+            tuple(HISTORICAL_TYPES))}
+    if scope == "history" and not hist:
+        con.close()
+        return []  # историч. доков нет — искать нечего
+    if scope == "all" or (scope == "live" and not hist):
+        scope_sql, scope_params = "", ()
+    else:
+        pph = ",".join("?" * len(hist))
+        op = "IN" if scope == "history" else "NOT IN"
+        scope_sql, scope_params = f" AND path {op} ({pph})", tuple(sorted(hist))
     results: dict = {}
 
     # bm25 — ранжировка по терминам (вес 1.0)
@@ -54,8 +82,8 @@ def cmd_search(root: Path, query: str, k: int = 8) -> list:
             for path, heading, lineno, snip, score in con.execute(
                 "SELECT path,heading,lineno,"
                 "snippet(fts,3,'»','«','…',14), bm25(fts) "
-                "FROM fts WHERE fts MATCH ? ORDER BY bm25(fts) LIMIT ?",
-                (bm_q, k * 3),
+                "FROM fts WHERE fts MATCH ?" + scope_sql + " ORDER BY bm25(fts) LIMIT ?",
+                (bm_q, *scope_params, k * 3),
             ):
                 results[(path, lineno)] = {
                     "path": path, "heading": heading, "line": int(lineno),
@@ -70,8 +98,8 @@ def cmd_search(root: Path, query: str, k: int = 8) -> list:
             for path, heading, lineno, snip, score in con.execute(
                 "SELECT path,heading,lineno,"
                 "snippet(tri,3,'»','«','…',14), bm25(tri) "
-                "FROM tri WHERE tri MATCH ? ORDER BY bm25(tri) LIMIT ?",
-                (tq, k * 2),
+                "FROM tri WHERE tri MATCH ?" + scope_sql + " ORDER BY bm25(tri) LIMIT ?",
+                (tq, *scope_params, k * 2),
             ):
                 key = (path, lineno)
                 if key not in results:
@@ -91,8 +119,8 @@ def cmd_search(root: Path, query: str, k: int = 8) -> list:
                 for path, heading, lineno, snip, body, score in con.execute(
                     "SELECT path,heading,lineno,"
                     "snippet(tri,3,'»','«','…',14), body, bm25(tri) "
-                    "FROM tri WHERE tri MATCH ? ORDER BY bm25(tri) LIMIT ?",
-                    (fq, k * 3),
+                    "FROM tri WHERE tri MATCH ?" + scope_sql + " ORDER BY bm25(tri) LIMIT ?",
+                    (fq, *scope_params, k * 3),
                 ):
                     key = (path, lineno)
                     if key in results:

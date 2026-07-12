@@ -20,6 +20,8 @@ links — inspired by Palantir Foundry/Gotham, but for documentation over code).
 python3 .claude/skills/kb-search/gitmark.py search "<topic>"
 ```
 If the topic already exists — **edit the existing doc**, don't create a second one.
+Adding/updating a `plan` or `report`? Add `--scope all` — default search hides historical
+docs, so without it the duplicate check misses an existing plan/report.
 
 ## When ADDING knowledge (CREATE)
 
@@ -27,7 +29,8 @@ If the topic already exists — **edit the existing doc**, don't create a second
    · `plan` · `guide` · `report` · `index`. Unsure → spec = `reference`, how-to = `guide`.
 2. **Put it in the right folder** (type → folder, all under `docs/gitmark/`): service-specific →
    `docs/gitmark/services/<svc>/`; cross-cutting → `docs/gitmark/reference/`; ops procedure →
-   `docs/gitmark/ops/`; plan → `docs/gitmark/plans/`; decision → `docs/gitmark/decisions/`.
+   `docs/gitmark/ops/`; plan → `docs/gitmark/plans/`; report → `docs/gitmark/reviews/`;
+   decision → `docs/gitmark/decisions/`.
 3. **Add frontmatter** (min `node_type`; for load-bearing docs also `title`, `service`,
    `status: active`, `updated: YYYY-MM-DD`):
    ```yaml
