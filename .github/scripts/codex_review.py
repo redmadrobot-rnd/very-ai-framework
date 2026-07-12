@@ -29,11 +29,9 @@ import urllib.request
 
 API = "https://api.github.com"
 SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
-MAX_DIFF = 200000  # almost any diff fits the context; truncation = missed findings
 
-# Branch-context prefix is added ONLY when the worktree is actually up (codex
-# runs on PR code). Otherwise the prompt must not claim files are available, or
-# codex would read default-branch files as if they were the PR.
+# Prepended to the prompt: codex reviews from a read-only worktree of the PR
+# branch, so it fetches the actual changes and surrounding code itself.
 PR_CONTEXT_NOTE = (
     "Your working directory is the PR branch checked out as a git repository "
     "(HEAD = PR head, base branch = origin/{base}). You have read-only shell "
@@ -329,15 +327,6 @@ def main() -> None:
     # --stat — full changed-file list + churn. Cheap, NEVER truncated: even with a
     # trimmed patch the model still knows the whole scope and reads files itself.
     diff_stat = run("git", "diff", "--stat", diff_range, "--", *diff_pathspec).strip()
-    # Patch into the prompt up to the limit; the model reads the rest from the worktree.
-    prompt_diff = full_diff
-    if len(prompt_diff) > MAX_DIFF:
-        prompt_diff = (
-            prompt_diff[:MAX_DIFF]
-            + "\n\n[patch truncated at the limit; the full file list is in Changed "
-            "files above, and the whole branch is available in the working "
-            "directory — read the rest yourself]"
-        )
 
     # codex handles untrusted PR code. It needs no token — strip GH_TOKEN from the
     # subprocess env so the secret isn't exposed to a tool-capable CLI.
@@ -358,14 +347,19 @@ def main() -> None:
         capture_output=True,
         text=True,
     )
-    pr_cwd = wt if add.returncode == 0 else None
-    if pr_cwd is None:
-        # worktree didn't come up — degrade to old behaviour (context = diff only).
-        print(f"worktree add failed, fallback diff-only: {add.stderr.strip()[:300]}")
+    if add.returncode != 0:
+        # No worktree = no PR code for codex to read. Fail loudly rather than let
+        # it review base-branch files as if they were the PR.
+        finalize(
+            "🤖 Codex review: не удалось подготовить рабочую копию PR "
+            f"(git worktree add).\n\n```\n{add.stderr.strip()[:1000]}\n```"
+        )
+        sys.exit("git worktree add failed")
 
-    # File-availability prefix ONLY when the worktree is up, else the prompt would
-    # lie to codex about PR context and it would review default-branch files as the
-    # PR. high reasoning effort — digs deeper across calls/cross-file links.
+    # codex reads the PR code from the worktree (--cd); the patch is not pasted,
+    # it runs git itself (see PR_CONTEXT_NOTE). high reasoning effort — digs deeper
+    # across calls/cross-file links. project_doc_max_bytes=0: don't load AGENTS.md
+    # from the PR-controlled worktree (prompt-injection vector, e.g. "return lgtm").
     codex_argv = [
         "codex",
         "exec",
@@ -373,28 +367,19 @@ def main() -> None:
         "read-only",
         "-c",
         'model_reasoning_effort="high"',
-        # Don't load AGENTS.md from the work dir: the --cd worktree holds
-        # PR-controlled code, and its AGENTS.md could feed the reviewer
-        # instructions (prompt injection, e.g. "return lgtm"). 0 = loading off.
         "-c",
         "project_doc_max_bytes=0",
+        "--cd",
+        wt,
     ]
-    prompt = PROMPT + pr_meta + "Changed files (git diff --stat):\n" + diff_stat + "\n"
-    if pr_cwd:
-        # worktree up → don't paste the patch, codex runs git diff itself
-        # (see PR_CONTEXT_NOTE).
-        codex_argv += ["--cd", pr_cwd]
-        prompt = PR_CONTEXT_NOTE.format(base=base) + prompt
-    else:
-        # worktree didn't come up → codex runs from the base checkout, NOT PR code.
-        # On-disk files = base branch; the only source of the PR's changes is the
-        # patch below. State it plainly so codex doesn't take on-disk for the PR.
-        prompt += (
-            "\nNo PR working tree is available: the files on disk are the BASE "
-            "branch, not this PR. The patch below is the ONLY source of the PR's "
-            "changes — review from it, and treat on-disk files as base context "
-            "only.\n\nDiff:\n" + prompt_diff
-        )
+    prompt = (
+        PR_CONTEXT_NOTE.format(base=base)
+        + PROMPT
+        + pr_meta
+        + "Changed files (git diff --stat):\n"
+        + diff_stat
+        + "\n"
+    )
     try:
         raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
     except Exception as exc:  # noqa: BLE001 — a codex failure must not strand the placeholder
@@ -404,12 +389,11 @@ def main() -> None:
         )
         sys.exit(f"codex exec failed: {exc}")
     finally:
-        if pr_cwd:
-            subprocess.run(
-                ["git", "worktree", "remove", "--force", wt],
-                capture_output=True,
-                text=True,
-            )
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", wt],
+            capture_output=True,
+            text=True,
+        )
 
     parsed = parse_codex_json(raw)
     if parsed is None:
