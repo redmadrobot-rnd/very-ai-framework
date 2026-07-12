@@ -22,10 +22,11 @@ ro OS-пользователем; единственный компонент в
 - `guard.py` + `profiles/` — PreToolUse-гард (default-deny allowlist) и профили
   (shell + БД: postgres/mongo/redis/rabbitmq). Единый источник правды политики «только чтение».
 - `admin.html` — self-contained страница `/admin`: выпуск/отзыв токенов (пользователи),
-  история сессий + монитор задач, просмотр аудита. Гейт — `SRV_EXPLORE_ADMIN_TOKEN`.
+  история сессий + монитор задач. Гейт — `SRV_EXPLORE_ADMIN_TOKEN`.
 - `agent_prompt.md` — системный промпт readonly-агента (правила + формат отчёта).
 - `token_store.py` (+ CLI) — bearer-токены: выдаёт/отзывает админ (UI или CLI), на
-  сервере только `sha256`. `run_store.py` — история прогонов (JSONL) для `/admin`.
+  сервере только `sha256`. `run_store.py` — история прогонов: последние N сессий НА
+  ЮЗЕРА (кап `SRV_EXPLORE_HISTORY_PER_USER`, дефолт 15), самоподрезается, без ротации.
 - `install.sh` + `systemd/srv-explore.service` + `requirements.txt` — установка на хост.
 
 Что держит «только чтение»: readonly-роль БД (фундамент) + `guard.py` server-side (граница,
@@ -78,10 +79,16 @@ claude mcp add --transport http srv-explore <URL>/mcp \
 
 `SRV_EXPLORE_ENV` (dev|prod — идентичность инстанса, к ней привязан токен) ·
 `SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind) ·
-`SRV_EXPLORE_GUARD`/`PROMPT`/`AUDIT`/`CWD` · `SRV_EXPLORE_TOKENS`/`SRV_EXPLORE_RUNS`
+`SRV_EXPLORE_GUARD`/`PROMPT`/`CWD` · `SRV_EXPLORE_TOKENS`/`SRV_EXPLORE_RUNS`
 (хэши токенов и история — в `/var/lib/srv-explore`, единственный писатель = сервис-юзер) ·
+`SRV_EXPLORE_HISTORY_PER_USER` (сколько сессий на юзера хранить, дефолт 15) ·
 `CLAUDE_CODE_OAUTH_TOKEN` (авторизация модели, секрет, пишет деплой) ·
-`SRV_EXPLORE_ADMIN_TOKEN` (гейт `/admin`; генерит `install.sh` один раз).
+`SRV_EXPLORE_ADMIN_TOKEN` (гейт `/admin`; генерит `install.sh` один раз) ·
+`SRV_EXPLORE_AUDIT` (путь лога команд — **опционально**; не задан → аудит не пишется).
+
+Что пишем на диск: `tokens.json` (хэши) и `runs.json` (история, кап на юзера) в
+`/var/lib/srv-explore`; аудит команд — только если задан `SRV_EXPLORE_AUDIT`. Роста нет:
+история подрезается капом, аудит по дефолту off (включают под комплаенс).
 
 Как сервис доступен инженеру (TLS-прокси, VPN, локальный проброс, …) — задача
 окружения, вне бандла. Бандлу нужен лишь достижимый `<URL>` + токен.

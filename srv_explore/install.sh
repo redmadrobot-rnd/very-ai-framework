@@ -66,11 +66,13 @@ SRV_EXPLORE_PORT=8765
 SRV_EXPLORE_CWD=/
 SRV_EXPLORE_GUARD=$APP_DIR/srv_explore/guard.py
 SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
-SRV_EXPLORE_AUDIT=$LOG_DIR/explore.log
 SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
-SRV_EXPLORE_RUNS=$STATE_DIR/runs.jsonl
+SRV_EXPLORE_RUNS=$STATE_DIR/runs.json
+SRV_EXPLORE_HISTORY_PER_USER=15
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели для агента) — дописывает деплой, не коммитить.
 # SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
+# SRV_EXPLORE_AUDIT=$LOG_DIR/explore.log — аудит команд ОПЦИОНАЛЕН: раскомментируй,
+#   чтобы гард писал allow/deny в лог (для комплаенса). По дефолту off — не пухнет.
 EOF
   chmod 0640 "$CFG_DIR/env"
   chown root:"$USER_NAME" "$CFG_DIR/env"
@@ -78,7 +80,8 @@ fi
 
 # 5b. ключи, которых может не быть в уже существующем env (идемпотентно, без перезаписи)
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
-ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.jsonl"
+ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.json"
+ensure_env_kv SRV_EXPLORE_HISTORY_PER_USER 15
 
 # 5c. админ-токен /admin — генерим ОДИН раз (переустановка не трогает выданный)
 if ! grep -q "^SRV_EXPLORE_ADMIN_TOKEN=" "$CFG_DIR/env"; then

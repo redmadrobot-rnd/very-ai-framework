@@ -230,18 +230,6 @@ class JobRegistry:
 # --- сборка сервера (ленивый импорт MCP/Starlette) ---------------------------
 
 
-def _audit_tail(limit: int = 200) -> list[str]:
-    """Последние строки аудит-лога (для просмотра в /admin)."""
-    path = os.environ.get("SRV_EXPLORE_AUDIT")
-    if not path or not Path(path).exists():
-        return []
-    try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    return lines[-limit:]
-
-
 def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
     """ASGI: MCP (инженерный токен) + /admin (админ-токен). Запуск через uvicorn."""
     import contextlib
@@ -325,12 +313,6 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
             {"runs": [_run_dict(r) for r in run_store.list_recent(100)]}
         )
 
-    async def admin_audit(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
-        return JSONResponse({"lines": _audit_tail(300)})
-
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
@@ -355,7 +337,6 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
                 "/admin/api/tokens/{token_id}/revoke", admin_revoke, methods=["POST"]
             ),
             Route("/admin/api/runs", admin_runs),
-            Route("/admin/api/audit", admin_audit),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(SplitAuth)],

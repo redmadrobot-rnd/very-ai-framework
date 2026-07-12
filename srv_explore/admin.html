@@ -75,7 +75,6 @@
   details summary:hover { color: var(--acc-h); }
   details pre { margin-top: .5rem; padding: .7rem .8rem; background: var(--surface2); border: 1px solid var(--bd); border-radius: 8px; }
 
-  #audit { color: var(--mut); background: var(--surface2); max-height: 340px; overflow: auto; }
   #authmsg { font-size: .85rem; }
   .gap { margin-top: 1rem; }
 </style>
@@ -108,13 +107,10 @@
       </div>
     </div>
 
-    <h2>История сессий <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
+    <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 15 на юзера</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
     <div class="card tbl-card">
       <table id="runtbl"><thead><tr><th>время</th><th>кто</th><th>задача</th><th>статус</th><th>итог</th></tr></thead><tbody></tbody></table>
     </div>
-
-    <h2>Аудит команд <span class="rl"><button class="rl" onclick="loadAudit()">⟳ обновить</button></span></h2>
-    <pre id="audit" class="card">—</pre>
   </div>
 </div>
 
@@ -142,7 +138,7 @@ async function boot() {
     $("#app").style.display = "";
     $("#authmsg").textContent = "";
     $("#authmsg").className = "muted";
-    loadRuns(); loadAudit();
+    loadRuns();
   } catch (e) {
     $("#app").style.display = "none";
     $("#authmsg").textContent = e.message;
@@ -196,11 +192,6 @@ async function loadRuns() {
     tb.appendChild(tr);
   }
   if (!d.runs.length) tb.innerHTML = `<tr><td colspan="5" class="muted">пока нет прогонов</td></tr>`;
-}
-
-async function loadAudit() {
-  const d = await (await api("/admin/api/audit")).json();
-  $("#audit").textContent = d.lines.length ? d.lines.join("\n") : "аудит пуст";
 }
 
 $("#admtok").addEventListener("keydown", e => { if (e.key === "Enter") saveToken(); });

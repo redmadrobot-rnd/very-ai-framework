@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from srv_explore.run_store import RunStore
+from srv_explore.run_store import RESULT_MAX, RunStore
 
 
 @pytest.fixture
 def runs_path(tmp_path):
-    return tmp_path / "runs.jsonl"
+    return tmp_path / "runs.json"
 
 
 def test_start_marks_running(runs_path):
@@ -67,3 +67,42 @@ def test_corrupt_file_does_not_crash(runs_path):
     runs_path.write_text("{not json}\n", encoding="utf-8")
     store = RunStore(runs_path)  # не должно бросить
     assert store.list_recent() == []
+
+
+def test_keeps_only_last_n_per_user(runs_path, monkeypatch):
+    monkeypatch.setenv("SRV_EXPLORE_HISTORY_PER_USER", "3")
+    store = RunStore(runs_path)
+    for i in range(5):
+        store.start(f"a{i}", task=f"t{i}", label="alice", env="dev")
+    alice = [r for r in store.list_recent() if r.label == "alice"]
+    assert len(alice) == 3
+    # выбывшие (старейшие) не находятся по id
+    assert store.get("a0") is None and store.get("a1") is None
+    assert store.get("a4") is not None
+
+
+def test_cap_is_per_user_independent(runs_path, monkeypatch):
+    monkeypatch.setenv("SRV_EXPLORE_HISTORY_PER_USER", "3")
+    store = RunStore(runs_path)
+    for i in range(5):
+        store.start(f"a{i}", task="t", label="alice", env="dev")
+    for i in range(2):
+        store.start(f"b{i}", task="t", label="bob", env="dev")
+    runs = store.list_recent(100)
+    assert len([r for r in runs if r.label == "alice"]) == 3
+    assert len([r for r in runs if r.label == "bob"]) == 2
+
+
+def test_cap_default_is_15(runs_path, monkeypatch):
+    monkeypatch.delenv("SRV_EXPLORE_HISTORY_PER_USER", raising=False)
+    store = RunStore(runs_path)
+    assert store.cap == 15
+
+
+def test_result_is_clipped(runs_path):
+    store = RunStore(runs_path)
+    store.start("j", task="t", label="a", env="dev")
+    store.finish("j", result="x" * (RESULT_MAX + 500))
+    out = store.get("j").result
+    assert len(out) < RESULT_MAX + 100
+    assert out.endswith("[обрезано]")

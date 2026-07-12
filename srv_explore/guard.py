@@ -87,9 +87,11 @@ SSH_VALUE_FLAGS = {"-p", "-i", "-l", "-c", "-m", "-b"}
 
 
 def audit(session: str, command: str, decision: str, reason: str) -> None:
-    log_path = os.environ.get("SRV_EXPLORE_AUDIT") or str(
-        HERE / "audit" / f"explore-{datetime.now(timezone.utc):%Y%m%d}.log"
-    )
+    # Аудит команд опционален: пишем только если задан SRV_EXPLORE_AUDIT. По дефолту
+    # молчим (enforcement держит гард, не запись) — файл не пухнет, чистить нечего.
+    log_path = os.environ.get("SRV_EXPLORE_AUDIT")
+    if not log_path:
+        return
     try:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         rec = {
