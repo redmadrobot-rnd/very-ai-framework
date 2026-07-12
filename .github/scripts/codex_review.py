@@ -29,12 +29,11 @@ import urllib.request
 
 API = "https://api.github.com"
 SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
-MAX_DIFF = 200000  # почти весь дифф влезает в контекст; урезание = пропущенные находки
+MAX_DIFF = 200000  # almost any diff fits the context; truncation = missed findings
 
-# Префикс с контекстом ветки добавляется ТОЛЬКО когда worktree реально поднят
-# (codex запущен в коде PR). Иначе промпт не должен заявлять о доступности
-# файлов — иначе codex прочитает файлы default-ветки, приняв их за PR
-# (вводящее в заблуждение ревью).
+# Branch-context prefix is added ONLY when the worktree is actually up (codex
+# runs on PR code). Otherwise the prompt must not claim files are available, or
+# codex would read default-branch files as if they were the PR.
 PR_CONTEXT_NOTE = (
     "Your working directory is the PR branch checked out as a git repository "
     "(HEAD = PR head, base branch = origin/{base}). You have read-only shell "
@@ -127,9 +126,9 @@ invent issues to fill the arrays.
 
 """
 
-# Блок с метаданными PR (title/body/draft) — даёт модели то, чего в diff нет:
-# заявленную цель, границы MVP/«stage 2» и признак незавершённости (draft).
-# Без него scope-creep и draft-мёрдж находки невозможны в принципе.
+# PR metadata (title/body/draft) gives the model what the diff can't: stated
+# intent, MVP/"stage 2" boundaries, and draft status. Without it scope-creep
+# and draft-merge findings are impossible.
 PR_META_TMPL = (
     "Pull request under review:\nTitle: {title}\nDraft: {draft}\n"
     "Description:\n<<<PR_BODY\n{body}\nPR_BODY\n\n"
@@ -164,7 +163,6 @@ def gh_api(
 
 
 def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
-    """Создать issue-коммент на PR. Возвращает его id (или None при ошибке)."""
     status, data = gh_api(
         "POST", f"/repos/{repo}/issues/{pr}/comments", token, {"body": body}
     )
@@ -172,14 +170,12 @@ def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
 
 
 def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
-    """Перезаписать тело ранее созданного issue-коммента."""
     gh_api(
         "PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body}
     )
 
 
 def delete_comment(repo: str, token: str, comment_id: int) -> None:
-    """Удалить issue-коммент (заглушку), когда итог уезжает в body ревью."""
     gh_api("DELETE", f"/repos/{repo}/issues/comments/{comment_id}", token)
 
 
@@ -259,8 +255,8 @@ def build_summary(
 def main() -> None:
     token, repo, pr = env("GH_TOKEN"), env("REPO"), env("PR_NUMBER")
     base, head_sha = os.environ.get("BASE_REF"), os.environ.get("HEAD_SHA")
-    # Всегда тянем PR — нужны title/body/draft для scope/process-находок
-    # (в diff их нет).
+    # Always fetch the PR — title/body/draft are needed for scope/process
+    # findings and are not in the diff.
     api_status, info = gh_api("GET", f"/repos/{repo}/pulls/{pr}", token)
     base = base or info.get("base", {}).get("ref")
     head_sha = head_sha or info.get("head", {}).get("sha")
@@ -270,24 +266,24 @@ def main() -> None:
         body=(info.get("body") or "(empty)")[:8000],
     )
 
-    # Сразу постим коммент-заглушку — сигнал, что ревью стартовало;
-    # его же обновим вердиктом.
+    # Post a placeholder immediately so it's visible the review started; the same
+    # comment is later overwritten with the verdict.
     progress_id = post_comment(
         repo, pr, token, "🤖 **Codex review** — анализирую изменения, подождите… ⏳"
     )
 
     def finalize(text: str) -> None:
-        """Финальный результат — поверх заглушки (или новым комментом,
-        если её создать не вышло)."""
+        # Write the final result over the placeholder (or as a new comment if it
+        # was never created).
         if progress_id is not None:
             edit_comment(repo, token, progress_id, text)
         else:
             post_comment(repo, pr, token, text)
 
-    # Базовая ветка нужна для diff-range и git fetch. В on-demand-режиме
-    # BASE_REF пуст → base целиком зависит от ответа API; при сбое запроса
-    # base=None и git fetch упал бы с TypeError мимо finalize (заглушка «⏳»
-    # висела бы вечно). Проверяем явно и сообщаем через finalize.
+    # Base branch is needed for the diff range and git fetch. In on-demand mode
+    # BASE_REF is empty, so base depends entirely on the API response; on failure
+    # base=None and git fetch would raise TypeError past finalize (placeholder
+    # stuck on "⏳" forever). Check explicitly and report through finalize.
     if not base:
         finalize(
             "🤖 Codex review: не удалось определить базовую ветку PR "
@@ -295,8 +291,8 @@ def main() -> None:
         )
         sys.exit("base ref unresolved (PR API lookup failed)")
 
-    # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
-    # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
+    # Diff by refs, not the work tree: the script runs from the branch it lives
+    # on (main); the PR head is taken explicitly via refs/pull/<n>/head.
     fetch_base = subprocess.run(
         ["git", "fetch", "origin", base], capture_output=True, text=True
     )
@@ -306,15 +302,15 @@ def main() -> None:
         text=True,
     )
     if fetch_base.returncode or fetch_head.returncode:
-        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем,
-        # чтобы дефект был виден.
+        # fetch failed — do NOT emit a false "no changes"; report and exit so the
+        # defect is visible.
         err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
         finalize(
             "🤖 Codex review: не смог получить изменения (git fetch упал)."
             f"\n\n```\n{err}\n```"
         )
         sys.exit("git fetch failed")
-    # Сгенерённые/шумные файлы не ревьюятся, но раздувают вход — исключаем из дифа.
+    # Generated/noisy files aren't reviewed but bloat the input — exclude them.
     diff_pathspec = [
         ".",
         ":(exclude)**/*.lock",
@@ -324,36 +320,34 @@ def main() -> None:
         ":(exclude)**/*.snap",
     ]
     diff_range = f"origin/{base}...FETCH_HEAD"
-    # ПОЛНЫЙ дифф — для анкоринга inline-комментов (commentable_lines).
-    # В модель НЕ уходит целиком; парсится локально, поэтому привязка
-    # работает для всех строк любого размера.
+    # FULL diff — for anchoring inline comments (commentable_lines). It is NOT
+    # sent to the model whole; parsed locally, so anchoring works for any line.
     full_diff = run("git", "diff", diff_range, "--", *diff_pathspec).strip()
     if not full_diff:
         finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
-    # --stat — полный список изменённых файлов + churn. Дёшев, НИКОГДА не
-    # режется: даже при урезанном патче модель знает весь scope и дочитывает
-    # нужные файлы из worktree.
+    # --stat — full changed-file list + churn. Cheap, NEVER truncated: even with a
+    # trimmed patch the model still knows the whole scope and reads files itself.
     diff_stat = run("git", "diff", "--stat", diff_range, "--", *diff_pathspec).strip()
-    # Патч в промпт — до лимита; остаток модель добирает чтением файлов (worktree ниже).
+    # Patch into the prompt up to the limit; the model reads the rest from the worktree.
     prompt_diff = full_diff
     if len(prompt_diff) > MAX_DIFF:
         prompt_diff = (
             prompt_diff[:MAX_DIFF]
-            + "\n\n[патч обрезан по лимиту; полный список файлов — в Changed "
-            "files выше, весь код ветки доступен в рабочей папке — дочитай "
-            "файлы сам]"
+            + "\n\n[patch truncated at the limit; the full file list is in Changed "
+            "files above, and the whole branch is available in the working "
+            "directory — read the rest yourself]"
         )
 
-    # codex обрабатывает недоверенный код PR. Токен ему не нужен — убираем GH_TOKEN из
-    # окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
+    # codex handles untrusted PR code. It needs no token — strip GH_TOKEN from the
+    # subprocess env so the secret isn't exposed to a tool-capable CLI.
     codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
 
-    # Полный код ветки PR — в отдельный detached worktree, для codex ТОЛЬКО на чтение.
-    # Главный чекаут (= default branch, откуда исполняется ЭТОТ скрипт) не трогаем: на
-    # self-hosted раннере недопустимо выполнять CI-логику из присланного
-    # контрибьютором кода. Раннер персистентный — сначала чистим остаток от
-    # возможного упавшего прогона.
+    # Full PR branch code goes into a separate detached worktree, read-only for
+    # codex. The main checkout (= default branch, which runs THIS script) is left
+    # untouched: on a self-hosted runner it is unacceptable to run CI logic from
+    # contributor-supplied code. The runner is persistent — clean up leftovers
+    # from a possibly failed run first.
     wt = "_pr_src"
     subprocess.run(
         ["git", "worktree", "remove", "--force", wt], capture_output=True, text=True
@@ -366,13 +360,12 @@ def main() -> None:
     )
     pr_cwd = wt if add.returncode == 0 else None
     if pr_cwd is None:
-        # worktree не встал — деградируем к старому поведению (контекст = только дифф).
+        # worktree didn't come up — degrade to old behaviour (context = diff only).
         print(f"worktree add failed, fallback diff-only: {add.stderr.strip()[:300]}")
 
-    # Префикс о доступности файлов — ТОЛЬКО при поднятом worktree, иначе промпт
-    # врал бы codex'у про PR-контекст и тот ревьюил бы файлы default-ветки как
-    # будто это PR. high reasoning effort — глубже проходит по вызовам/
-    # крос-файловым связям (больше находок).
+    # File-availability prefix ONLY when the worktree is up, else the prompt would
+    # lie to codex about PR context and it would review default-branch files as the
+    # PR. high reasoning effort — digs deeper across calls/cross-file links.
     codex_argv = [
         "codex",
         "exec",
@@ -380,22 +373,22 @@ def main() -> None:
         "read-only",
         "-c",
         'model_reasoning_effort="high"',
-        # Не грузим AGENTS.md из рабочего каталога: worktree с --cd содержит
-        # PR-контролируемый код, и его AGENTS.md мог бы подсунуть ревьюеру
-        # инструкции (prompt injection, напр. «верни lgtm»). 0 = загрузка выкл.
+        # Don't load AGENTS.md from the work dir: the --cd worktree holds
+        # PR-controlled code, and its AGENTS.md could feed the reviewer
+        # instructions (prompt injection, e.g. "return lgtm"). 0 = loading off.
         "-c",
         "project_doc_max_bytes=0",
     ]
     prompt = PROMPT + pr_meta + "Changed files (git diff --stat):\n" + diff_stat + "\n"
     if pr_cwd:
-        # worktree поднят → патч не вставляем, codex берёт `git diff` сам
-        # (см. PR_CONTEXT_NOTE).
+        # worktree up → don't paste the patch, codex runs git diff itself
+        # (see PR_CONTEXT_NOTE).
         codex_argv += ["--cd", pr_cwd]
         prompt = PR_CONTEXT_NOTE.format(base=base) + prompt
     else:
-        # worktree не встал → codex работает из базового чекаута, НЕ из кода PR.
-        # Файлы на диске = base-ветка; единственный источник изменений PR — патч
-        # ниже (до лимита). Прямо предупреждаем, чтобы codex не принял on-disk за PR.
+        # worktree didn't come up → codex runs from the base checkout, NOT PR code.
+        # On-disk files = base branch; the only source of the PR's changes is the
+        # patch below. State it plainly so codex doesn't take on-disk for the PR.
         prompt += (
             "\nNo PR working tree is available: the files on disk are the BASE "
             "branch, not this PR. The patch below is the ONLY source of the PR's "
@@ -404,7 +397,7 @@ def main() -> None:
         )
     try:
         raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
-    except Exception as exc:  # noqa: BLE001 — сбой codex не должен вешать заглушку
+    except Exception as exc:  # noqa: BLE001 — a codex failure must not strand the placeholder
         finalize(
             "🤖 Codex review: не удалось выполнить codex."
             f"\n\n```\n{str(exc)[:1000]}\n```"
@@ -447,10 +440,10 @@ def main() -> None:
 
     summary = build_summary(verdict, parsed.get("summary", ""), orphans, overall)
 
-    # Inline-замечания по строкам — отдельным review (без них review создавать нельзя).
-    # Чтобы итог жил в ОДНОМ месте, кладём вердикт+summary прямо в body ревью, а
-    # коммент-заглушку удаляем. Если inline-находок нет (или привязка отклонена) —
-    # ревью не создаём и пишем итог в заглушку, как раньше.
+    # Inline line comments go as a separate review (a review can't be created
+    # without them). To keep the result in ONE place, put verdict+summary in the
+    # review body and delete the placeholder. With no inline findings (or if
+    # anchoring is rejected) — no review; write the result into the placeholder.
     review_status = 200
     if inline:
         review = {
@@ -464,7 +457,7 @@ def main() -> None:
         )
 
     if inline and review_status < 300:
-        # итог уехал в body ревью → заглушка больше не нужна
+        # result went into the review body → placeholder no longer needed
         if progress_id is not None:
             delete_comment(repo, token, progress_id)
         print(
@@ -472,7 +465,7 @@ def main() -> None:
             f"verdict={verdict}"
         )
     elif review_status >= 300:
-        # привязка inline отклонена — складываем все находки в итоговый коммент
+        # inline anchoring rejected — put all findings into the summary comment
         all_findings = orphans + [
             {
                 "path": c["path"],
@@ -490,7 +483,7 @@ def main() -> None:
             f"reviews API returned {review_status}; put everything in summary comment"
         )
     else:
-        # inline-находок нет — итог только в комменте
+        # no inline findings — result only in the comment
         finalize(summary)
         print(f"no inline findings; summary comment only, verdict={verdict}")
 
