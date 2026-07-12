@@ -29,7 +29,8 @@ HISTORICAL_TYPES = {"plan", "report"}
 
 HEAD_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$")
 FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-NODE_TYPE_RE = re.compile(r"^\s*node_type\s*:\s*([\w-]+)", re.MULTILINE)
+# значение может быть в кавычках (`node_type: "plan"`) — линт их принимает, индекс тоже.
+NODE_TYPE_RE = re.compile(r"""^\s*node_type\s*:\s*['"]?([\w-]+)""", re.MULTILINE)
 H1_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 # markdown-ссылка [text](href) — не картинка (отрицательный lookbehind на `!`)
 LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)]+)\)")

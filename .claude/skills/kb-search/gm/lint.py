@@ -10,7 +10,7 @@ from pathlib import Path
 from .core import KB_DIR, LINK_RE, iter_md, kb_subpath, nfc, resolve_link
 
 # Подкаталоги БЗ, где документ считается «несущим» (требует frontmatter с node_type).
-BEARING_DIRS = ("reference", "ops", "plans", "decisions", "services")
+BEARING_DIRS = ("reference", "ops", "plans", "reviews", "decisions", "services")
 
 # Инварианты онтологии: код → описание. Единый источник истины — отсюда же
 # берётся справка CLI. Сами проверки реализованы в cmd_lint и помечают находки кодом.
