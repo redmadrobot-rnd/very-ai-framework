@@ -55,8 +55,7 @@ The goal is the **minimal viable path**. In dialogue with the user the agent:
 **The output is agreed with the user:** the stack is fixed, the HLD is described.
 
 Working artifacts of the run (proposal, research notes, HLD, task breakdown) go into the
-KB as `plan`/`report` docs (`docs/gitmark/plans/<feature>/` · `reviews/`) — dated snapshots
-of intent, kept as history (see the ontology on living vs historical docs).
+KB as `plan`/`report` docs under `docs/gitmark/plans/<feature>/` · `reviews/`.
 
 ## 5. Tasks and /goal — the agent writes the plan, the human accepts it
 The accumulated context (HLD + stack + decisions) is sliced into tasks per the
@@ -86,8 +85,8 @@ With the PR the agent attaches a **short digest of the specs and key engineering
 (for the reviewer to look at: data models and DB entities, indexes, protocols, API endpoints).
 Merge — **after human approval**. dev/prod deploy is automatic. After merge, reconcile the
 living docs with what actually shipped: update the touched `service`/`reference` docs (via
-`kb-maintain`), add a `decision` for any lasting architectural choice. The `plan`/`report`
-stays as the dated snapshot.
+`kb-maintain`), add a `decision` for any lasting architectural choice. The original
+`plan`/`report` is left as-is.
 
 ## Interaction principles
 - Ask **before** starting whatever isn't derivable from the code; silently gather what is.

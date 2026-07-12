@@ -27,8 +27,6 @@ docs, so without it the duplicate check misses an existing plan/report.
 
 1. **Pick a `node_type`**: `service` · `reference` · `runbook` · `gotcha` · `decision`
    · `plan` · `guide` · `report` · `index`. Unsure → spec = `reference`, how-to = `guide`.
-   `plan`/`report` are **historical** (dated snapshots) — they stay in the KB but `search`
-   hides them by default (`--scope all` to include, `--scope history` for only those).
 2. **Put it in the right folder** (type → folder, all under `docs/gitmark/`): service-specific →
    `docs/gitmark/services/<svc>/`; cross-cutting → `docs/gitmark/reference/`; ops procedure →
    `docs/gitmark/ops/`; plan → `docs/gitmark/plans/`; report → `docs/gitmark/reviews/`;
