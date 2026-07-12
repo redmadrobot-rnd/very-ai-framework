@@ -56,10 +56,10 @@ cd /opt/srv-explore && sudo venv/bin/python -m srv_explore.token_store \
 # печатает токен ОДИН раз — отдать инженеру; отозвать: ... revoke <id>; список: ... list
 ```
 
-Инженер (будучи в VPN окружения) подключает remote MCP у себя (см. скилл `srv-explore`):
+Инженер подключает remote MCP у себя (см. скилл `srv-explore`):
 
 ```bash
-claude mcp add --transport http srv-explore http://<vpn-ip>:8765/mcp \
+claude mcp add --transport http srv-explore <URL>/mcp \
   --header "Authorization: Bearer srvx_..."
 ```
 
@@ -68,10 +68,12 @@ claude mcp add --transport http srv-explore http://<vpn-ip>:8765/mcp \
 ## Конфиг (`/etc/srv-explore/env`)
 
 `SRV_EXPLORE_ENV` (dev|prod — идентичность инстанса, к ней привязан токен) ·
-`SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind на
-приватный VPN-интерфейс — серверы за VPN, наружу сервис не смотрит; домен/TLS не
-нужны, транспорт шифрует VPN) · `SRV_EXPLORE_GUARD`/`PROMPT`/`AUDIT`/`TOKENS`/`CWD` ·
-`CLAUDE_CODE_OAUTH_TOKEN` (авторизация модели, секрет, пишет деплой).
+`SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind) ·
+`SRV_EXPLORE_GUARD`/`PROMPT`/`AUDIT`/`TOKENS`/`CWD` · `CLAUDE_CODE_OAUTH_TOKEN`
+(авторизация модели, секрет, пишет деплой).
+
+Как сервис доступен инженеру (TLS-прокси, VPN, локальный проброс, …) — задача
+окружения, вне бандла. Бандлу нужен лишь достижимый `<URL>` + токен.
 
 ## Статус проверки
 
@@ -83,4 +85,4 @@ claude mcp add --transport http srv-explore http://<vpn-ip>:8765/mcp \
   docker-proxy → дефолт 8765; `tokens.json` 0600 ломал чтение сервисом → 0640; `python3-venv`
   доустанавливается в install.
 - **Ещё НЕ прогнано:** деплой-воркфлоу (нужен мерж в main, `workflow_dispatch` виден только
-  с дефолтной ветки); bind на VPN-интерфейс и readonly-роль БД — под конкретное окружение.
+  с дефолтной ветки); сетевая доступность сервиса инженеру и readonly-роль БД — под окружение.
