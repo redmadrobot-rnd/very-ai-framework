@@ -1,21 +1,18 @@
-"""Codex PR reviewer — posts a live status comment, then fills it with the verdict.
-
-Flow:
-  1. immediately post a placeholder comment ("анализирую… ⏳") so it's visible
-     the job started;
-  2. compute the PR diff against the base branch;
-  3. ask `codex exec` for structured JSON findings (subscription auth on the runner);
-  4. keep only findings that land on a line actually present in the diff;
-  5. if there are inline findings, post ONE PR review carrying the verdict/summary
-     in its body plus the inline threads, then delete the placeholder (single
-     surface). With no inline findings, edit the placeholder into the summary instead.
-
-Findings that can't be anchored to a diff line, and any parse/post failure,
-degrade into the summary comment — the job never hard-fails on review noise.
-
-Env (provided by the workflow):
-  GH_TOKEN, REPO (owner/repo), PR_NUMBER, BASE_REF, HEAD_SHA
-"""
+#!/usr/bin/env python3
+#
+# ЧТО ДЕЛАЕТ: авто-ревью PR через codex exec — постит live-коммент со статусом и
+#             наполняет его вердиктом (LGTM / Needs changes) и inline-замечаниями.
+# Вход:    env от workflow: GH_TOKEN, REPO (owner/repo), PR_NUMBER;
+#          опц. BASE_REF, HEAD_SHA (иначе берутся из GitHub API по PR).
+# Алгоритм:
+#   сразу постим коммент-заглушку («анализирую… ⏳») — видно, что джоб пошёл;
+#   считаем дифф PR против базовой ветки (git fetch base + refs/pull/<n>/head);
+#   код PR — в read-only detached worktree; codex exec копает его сам и отдаёт JSON;
+#   оставляем только находки, привязываемые к строке диффа (прочее — в summary);
+#   есть inline → один PR-review: вердикт+summary в теле, заглушку удаляем;
+#   нет inline → вписываем итог в заглушку.
+# Выход:   PR-review или коммент с вердиктом; парс/пост-сбой деградирует в
+#          summary-коммент — джоб не падает на шуме ревью.
 
 from __future__ import annotations
 
