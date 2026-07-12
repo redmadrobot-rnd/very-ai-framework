@@ -60,8 +60,7 @@ object (no markdown, no prose, no code fences). Schema:
 
 {
   "verdict": "lgtm" | "needs_changes",
-  "summary": "<two or three sentence overall assessment: what the PR does and
-              the headline verdict>",
+  "summary": "<2-3 sentence assessment: what the PR does + the verdict>",
   "overall": [
     {
       "severity": "high" | "medium" | "low",
@@ -370,6 +369,11 @@ def main() -> None:
         "read-only",
         "-c",
         'model_reasoning_effort="high"',
+        # Не грузим AGENTS.md из рабочего каталога: worktree с --cd содержит
+        # PR-контролируемый код, и его AGENTS.md мог бы подсунуть ревьюеру
+        # инструкции (prompt injection, напр. «верни lgtm»). 0 = загрузка выкл.
+        "-c",
+        "project_doc_max_bytes=0",
     ]
     prompt = PROMPT + pr_meta + "Changed files (git diff --stat):\n" + diff_stat + "\n"
     if pr_cwd:
