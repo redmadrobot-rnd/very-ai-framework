@@ -57,55 +57,17 @@ def test_admin_authorized_matches(monkeypatch):
     assert mcp_server.admin_authorized("adm_secret") is False  # без Bearer
 
 
-# --- мост к guard.py ----------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _utf8(monkeypatch):
     monkeypatch.setenv("PYTHONUTF8", "1")
 
 
-def test_guard_decision_allows_local_read():
-    allow, _ = mcp_server.guard_decision("Bash", {"command": "df -h"})
-    assert allow is True
+# --- воркер агента (гард + промпт) --------------------------------------------
 
 
-def test_guard_decision_denies_redirect_write():
-    # гигиена: метасимвол записи режется (бэкстоп, если RO-FS не включён)
-    allow, reason = mcp_server.guard_decision(
-        "Bash", {"command": "cat x > /etc/passwd"}
-    )
-    assert allow is False
-    assert reason
+def test_worker_prompt_loads():
+    from srv_explore import agent_worker
 
-
-def test_guard_decision_allows_curl_permissive():
-    # curl не регулируется гардом — egress держит firewall (ресурс-слой)
-    allow, _ = mcp_server.guard_decision(
-        "Bash", {"command": "curl -s http://localhost:8080/health"}
-    )
-    assert allow is True
-
-
-def test_guard_decision_allows_db_client_permissive():
-    # psql permissive — read-only держит роль БД, не гард
-    allow, _ = mcp_server.guard_decision(
-        "Bash", {"command": 'psql -c "SELECT 1"'}
-    )
-    assert allow is True
-
-
-def test_guard_decision_non_bash_passthrough():
-    allow, _ = mcp_server.guard_decision("Read", {"file_path": "/etc/hosts"})
-    assert allow is True
-
-
-# --- системный промпт ---------------------------------------------------------
-
-
-def test_load_system_prompt_strips_frontmatter():
-    prompt = mcp_server.load_system_prompt()
-    assert not prompt.startswith("---")
-    assert "tools:" not in prompt.splitlines()[0]
-    # тело промпта субагента про read-only
+    prompt = agent_worker._prompt()
+    assert prompt
     assert "чтение" in prompt.lower() or "read" in prompt.lower()

@@ -1,27 +1,29 @@
 """Remote MCP srv-explore: на хосте живёт readonly-агент, на вход — задача.
 
-Инженер из своего Claude Code дёргает tool `srv_explore(task)`; сервер крутит Claude
-Agent SDK headless с readonly-агентом. Каждую Bash-команду пропускает через `guard.py`
-— гигиену (метасимволы/спецфайлы), НЕ единственный барьер.
+Инженер из своего Claude Code дёргает tool `srv_explore(task)`. Сервис (root) провижинит
+и спавнит агента в ПЕСОЧНИЦЕ (sandbox.py: unprivileged `srvx-agent` + RO-FS); опасный
+bash крутится там, не здесь. Каждую Bash-команду агента фильтрует гард-гигиена.
 
-Read-only держит РЕСУРС-СЛОЙ на сервере (RO-FS, egress-firewall, unprivileged-юзер,
-read-only роли БД, docker-socket-proxy) — см. DESIGN.md. Плюс bearer-токен на входе
-(token_store) и `permission_mode="dontAsk"` с узким `allowed_tools`.
+Read-only держит РЕСУРС-СЛОЙ (RO-FS песочницы, read-only роли БД, docker-socket-proxy,
+egress-firewall) — см. README. Плюс bearer-токен на входе (token_store).
 
-Зависимости рантайма (claude-agent-sdk, mcp, starlette, uvicorn) импортируются лениво,
-чтобы чистая логика (авторизация, мост к гарду) тестировалась без них.
+Зависимости рантайма (mcp, starlette, uvicorn) импортируются лениво, чтобы чистая логика
+(авторизация) тестировалась без них.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import os
 import secrets
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, guard, profile_store, tunnel_keys
+from srv_explore import backstop, profile_store, provision, sandbox, tunnel_keys
 from srv_explore.token_store import TokenStore
 
 
@@ -30,7 +32,6 @@ def _now() -> str:
 
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_PROMPT = HERE / "agent_prompt.md"
 ADMIN_PAGE = HERE / "admin.html"
 
 
@@ -38,15 +39,9 @@ def public_host() -> str:
     return os.environ.get("SRV_EXPLORE_PUBLIC_HOST", "<host>")
 
 
-ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
-
-# Запись инженерного токена текущего запроса: ставит BearerAuth, читает srv_explore.
+# Инженерный токен текущего запроса: ставит SplitAuth, читает srv_explore (label).
 CURRENT_TOKEN: contextvars.ContextVar = contextvars.ContextVar(
     "srv_explore_token", default=None
-)
-# Команды текущего прогона: список наполняет PreToolUse-хук, забирает run_agent.
-CURRENT_STEPS: contextvars.ContextVar = contextvars.ContextVar(
-    "srv_explore_steps", default=None
 )
 
 
@@ -87,100 +82,51 @@ def admin_authorized(authorization: str | None) -> bool:
     return secrets.compare_digest(provided, configured)
 
 
-# --- мост к guard.py (гигиена: метасимволы/спецфайлы) ------------------------
+# --- запуск агента в песочнице ------------------------------------------------
+
+# env, которые нужно пробросить агенту в песочницу (наружу песочница env не наследует).
+_AGENT_PASS_ENV = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "PATH",
+    "SRV_EXPLORE_CWD",
+    "SRV_EXPLORE_PROMPT",
+    "SRV_EXPLORE_MAX_TURNS",
+]
 
 
-def guard_decision(
-    tool_name: str, tool_input: dict, session_id: str = "mcp"
-) -> tuple[bool, str]:
-    """Решение гарда-гигиены в процессе (без спавна): (allow, reason)."""
-    if tool_name != "Bash":
-        return True, "не Bash — гард не применяется"
-    command = (tool_input or {}).get("command", "")
-    if not command.strip():
-        return False, "пустая команда"
-    return guard.check_command_string(command)
-
-
-def make_pretooluse_hook():
-    """Async PreToolUse-хук для Agent SDK: мост к guard_decision."""
-
-    async def hook(input_data, tool_use_id, context):  # noqa: ARG001 (сигнатура SDK)
-        tool = input_data.get("tool_name", "")
-        tool_input = input_data.get("tool_input", {}) or {}
-        allow, reason = guard_decision(tool, tool_input)
-        if tool == "Bash":
-            steps = CURRENT_STEPS.get()
-            if steps is not None:
-                steps.append(
-                    {
-                        "cmd": tool_input.get("command", ""),
-                        "ok": allow,
-                        "reason": "" if allow else reason,
-                    }
-                )
-        if allow:
-            return {}
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-            }
-        }
-
-    return hook
-
-
-def load_system_prompt(prompt_file: Path | None = None) -> str:
-    """Системный промпт readonly-агента из srv_explore/agent_prompt.md."""
-    path = prompt_file or Path(
-        os.environ.get("SRV_EXPLORE_PROMPT", str(DEFAULT_PROMPT))
+def security_probe() -> dict:
+    """Проба FS-хардинга в ПЕСОЧНИЦЕ агента (не сервиса — тот привилегирован).
+    Не root/нет systemd-run → in-process fallback (dev)."""
+    if not sandbox.available():
+        return backstop.probe()
+    code = (
+        "import json,srv_explore.backstop as b;"
+        "print(json.dumps({'fs_readonly':b._fs_readonly()}))"
     )
-    text = path.read_text(encoding="utf-8")
-    if text.startswith("---"):  # на случай, если файл всё же с frontmatter
-        end = text.find("\n---", 3)
-        if end != -1:
-            text = text[end + 4 :]
-    return text.strip()
-
-
-# --- запуск агента (ленивый импорт SDK) --------------------------------------
+    rc, out, _ = sandbox.run([sys.executable, "-c", code])
+    try:
+        return json.loads(out) if rc == 0 else {"fs_readonly": None}
+    except ValueError:
+        return {"fs_readonly": None}
 
 
 async def run_agent(task: str) -> tuple[str, list]:
-    """Прогнать задачу readonly-агентом; вернуть (отчёт, команды сессии)."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        HookMatcher,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    """Прогнать задачу readonly-агентом В ПЕСОЧНИЦЕ; вернуть (отчёт, команды сессии)."""
+    env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
+    env.update(profile_store.provisioned())  # DOCKER_HOST на socket-proxy, *_DSN
+    worker = [sys.executable, "-m", "srv_explore.agent_worker"]
 
-    options = ClaudeAgentOptions(
-        system_prompt=load_system_prompt(),
-        allowed_tools=ALLOWED_TOOLS,
-        permission_mode="dontAsk",
-        hooks={
-            "PreToolUse": [HookMatcher(matcher="Bash", hooks=[make_pretooluse_hook()])]
-        },
-        cwd=os.environ.get("SRV_EXPLORE_CWD", "/"),
-        setting_sources=[],  # изоляция: не тянем чужой .claude, всё задаём явно
-        max_turns=int(os.environ.get("SRV_EXPLORE_MAX_TURNS", "40")),
-    )
+    def spawn():
+        return sandbox.run(worker, input_text=task, extra_env=env)
 
-    steps: list = []
-    CURRENT_STEPS.set(steps)
-    final_text: list[str] = []
-    result: str | None = None
-    async for msg in query(prompt=task, options=options):
-        if isinstance(msg, AssistantMessage):
-            final_text = [b.text for b in msg.content if isinstance(b, TextBlock)]
-        elif isinstance(msg, ResultMessage):
-            result = msg.result
-    return result or "\n".join(final_text), steps
+    rc, out, err = await asyncio.to_thread(spawn)
+    if rc != 0:
+        return f"[agent error] {(err or out).strip()[:800]}", []
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return f"[agent output parse error] {out.strip()[:800]}", []
+    return data.get("result", ""), data.get("steps", [])
 
 
 # --- реестр задач (job-id + poll) --------------------------------------------
@@ -195,8 +141,6 @@ class JobRegistry:
         self.limit = limit
 
     def start(self, task: str, label: str, coro_factory) -> str:
-        import asyncio
-
         job_id = "job_" + secrets.token_hex(6)
         self._jobs[job_id] = {
             "id": job_id,
@@ -251,7 +195,7 @@ def build_app(store: TokenStore | None = None):
 
     tokens = store or TokenStore()
     jobs = JobRegistry()
-    security = backstop.probe()  # один раз при старте сервиса
+    security = security_probe()  # один раз при старте (в песочнице агента)
     mcp = FastMCP("srv-explore", streamable_http_path="/mcp")
 
     @mcp.tool()
@@ -353,12 +297,20 @@ def build_app(store: TokenStore | None = None):
         if request.method == "POST":
             body = await request.json()
             name = body.get("name", "")
-            try:
-                profile_store.set_enabled(name, bool(body.get("enabled")))
-            except KeyError:
+            enabled = bool(body.get("enabled"))
+            if name not in profile_store.registry():
                 return JSONResponse({"error": "неизвестный профиль"}, status_code=404)
-            except OSError as e:
-                return JSONResponse({"error": repr(e)}, status_code=500)
+            try:
+                if enabled:
+                    env = await asyncio.to_thread(provision.enable, name)
+                    if env:
+                        profile_store.add_provisioned(env)
+                else:
+                    keys = await asyncio.to_thread(provision.down, name)
+                    profile_store.drop_provisioned(keys)
+                profile_store.set_enabled(name, enabled)
+            except (subprocess.CalledProcessError, OSError, KeyError) as e:
+                return JSONResponse({"error": f"provision: {e}"}, status_code=500)
         state = profile_store.load()
         return JSONResponse(
             {

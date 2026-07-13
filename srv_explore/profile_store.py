@@ -73,3 +73,37 @@ def set_enabled(name: str, enabled: bool) -> dict[str, bool]:
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, path)
     return state
+
+
+# --- provisioned env: что провизионер выдал агенту (DOCKER_HOST, *_DSN) ----------
+
+
+def _prov_path() -> Path:
+    return store_path().with_name("provisioned.json")
+
+
+def provisioned() -> dict[str, str]:
+    try:
+        return json.loads(_prov_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_prov(env: dict[str, str]) -> None:
+    p = _prov_path()
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(env, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def add_provisioned(env: dict[str, str]) -> None:
+    cur = provisioned()
+    cur.update(env)
+    _write_prov(cur)
+
+
+def drop_provisioned(keys) -> None:
+    cur = provisioned()
+    for k in keys:
+        cur.pop(k, None)
+    _write_prov(cur)

@@ -9,14 +9,19 @@ PACKAGES = ["docker-cli"]
 CREDS_ENV = "DOCKER_HOST"  # провизионер укажет на прокси
 
 # Прокси перед /var/run/docker.sock: read-эндпоинты on, мутации (POST) off.
+# Агент ходит в него по DOCKER_HOST, к реальному сокету доступа нет.
 PROXY = {
-    "image": "ghcr.io/tecnativa/docker-socket-proxy",
+    "image": "ghcr.io/tecnativa/docker-socket-proxy:latest",
+    "port": "127.0.0.1:2375:2375",
     "env": {
         "CONTAINERS": "1",
         "IMAGES": "1",
         "NETWORKS": "1",
         "VOLUMES": "1",
         "INFO": "1",
+        "PING": "1",
+        "VERSION": "1",
         "POST": "0",
     },
+    "sets": {"DOCKER_HOST": "tcp://127.0.0.1:2375"},
 }
