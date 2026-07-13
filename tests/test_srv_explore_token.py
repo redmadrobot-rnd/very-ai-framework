@@ -31,10 +31,9 @@ def test_generate_token_shape_and_uniqueness():
 
 def test_issue_returns_plaintext_but_stores_only_hash(store_path):
     store = TokenStore(store_path)
-    record, token = store.issue("alice", "dev")
+    record, token = store.issue("alice")
 
     assert token.startswith(TOKEN_PREFIX)
-    assert record.env == "dev"
     assert record.label == "alice"
 
     raw = json.loads(store_path.read_text(encoding="utf-8"))
@@ -46,7 +45,7 @@ def test_issue_returns_plaintext_but_stores_only_hash(store_path):
 
 def test_verify_accepts_valid_rejects_unknown(store_path):
     store = TokenStore(store_path)
-    _, token = store.issue("alice", "dev")
+    _, token = store.issue("alice")
 
     assert store.verify(token) is not None
     assert store.verify(token + "x") is None
@@ -54,18 +53,9 @@ def test_verify_accepts_valid_rejects_unknown(store_path):
     assert store.verify("") is None
 
 
-def test_verify_env_scoping(store_path):
-    store = TokenStore(store_path)
-    _, dev_token = store.issue("alice", "dev")
-
-    assert store.verify(dev_token, env="dev") is not None
-    # dev-токен не должен пройти в prod.
-    assert store.verify(dev_token, env="prod") is None
-
-
 def test_revoke_removes_token(store_path):
     store = TokenStore(store_path)
-    record, token = store.issue("alice", "dev")
+    record, token = store.issue("alice")
 
     assert store.verify(token) is not None
     assert store.revoke(record.id) is True
@@ -75,10 +65,10 @@ def test_revoke_removes_token(store_path):
 
 def test_persistence_across_reload(store_path):
     store = TokenStore(store_path)
-    _, token = store.issue("alice", "prod")
+    _, token = store.issue("alice")
 
     reloaded = TokenStore(store_path)
-    rec = reloaded.verify(token, env="prod")
+    rec = reloaded.verify(token)
     assert rec is not None
     assert rec.label == "alice"
 
@@ -89,19 +79,13 @@ def test_verify_reloads_external_changes(store_path):
     runner = TokenStore(store_path)
     admin = TokenStore(store_path)
 
-    _, token = admin.issue("alice", "dev")
+    _, token = admin.issue("alice")
     # runner создан ДО выдачи — но verify перечитает файл и увидит токен
-    assert runner.verify(token, env="dev") is not None
+    assert runner.verify(token) is not None
 
     rec = admin.list()[0]
     admin.revoke(rec.id)
-    assert runner.verify(token, env="dev") is None
-
-
-def test_issue_rejects_bad_env(store_path):
-    store = TokenStore(store_path)
-    with pytest.raises(ValueError):
-        store.issue("alice", "staging")
+    assert runner.verify(token) is None
 
 
 def test_missing_store_file_is_empty(store_path):
@@ -125,7 +109,7 @@ def test_cli_issue_list_revoke_roundtrip(store_path):
             text=True,
         )
 
-    issued = run("issue", "--label", "bob", "--env", "dev")
+    issued = run("issue", "--label", "bob")
     assert issued.returncode == 0
     token_line = issued.stdout.strip().splitlines()[-1]
     assert token_line.startswith(TOKEN_PREFIX)

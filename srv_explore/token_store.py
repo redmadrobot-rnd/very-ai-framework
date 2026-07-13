@@ -1,11 +1,10 @@
 """Хранилище bearer-токенов доступа к srv-explore MCP (админ выдаёт/отзывает).
 
-Модель: админ генерирует токен, отдаёт инженеру ОДИН раз. На сервере хранится только
-`sha256` токена — утечка файла хранилища не раскрывает сами токены. Токен привязан к
-окружению (`dev`/`prod`); запрос в чужое окружение отклоняется.
+Токен привязан к инстансу: его `sha256` лежит только в этом файле, на другом сервере
+не пройдёт. На сервере хранится только хэш — утечка файла не раскрывает сами токены.
 
-CLI: `python -m srv_explore.token_store issue --label alice --env dev` / `revoke <id>`
-/ `list`. Файл хранилища — env `SRV_EXPLORE_TOKENS` или `/etc/srv-explore/tokens.json`.
+CLI: `python -m srv_explore.token_store issue --label alice` / `revoke <id>` / `list`.
+Файл хранилища — env `SRV_EXPLORE_TOKENS` или `/var/lib/srv-explore/tokens.json`.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from pathlib import Path
 
 TOKEN_PREFIX = "srvx_"
 DEFAULT_STORE = "/var/lib/srv-explore/tokens.json"
-VALID_ENVS = ("dev", "prod")
 
 
 def generate_token() -> str:
@@ -39,7 +37,6 @@ def token_hash(token: str) -> str:
 class TokenRecord:
     id: str
     label: str
-    env: str
     sha256: str
     created: str
 
@@ -79,21 +76,16 @@ class TokenStore:
         except OSError:
             pass
 
-    def issue(
-        self, label: str, env: str, now: datetime | None = None
-    ) -> tuple[TokenRecord, str]:
+    def issue(self, label: str, now: datetime | None = None) -> tuple[TokenRecord, str]:
         """Сгенерировать токен, сохранить его хэш, вернуть (запись, токен-в-открытую).
 
         Открытый токен возвращается ЕДИНОЖДЫ — сохранить его негде, только у выдавшего.
         """
-        if env not in VALID_ENVS:
-            raise ValueError(f"env must be one of {VALID_ENVS}, got {env!r}")
         token = generate_token()
         created = (now or datetime.now(timezone.utc)).replace(microsecond=0).isoformat()
         record = TokenRecord(
             id=secrets.token_hex(4),
             label=label,
-            env=env,
             sha256=token_hash(token),
             created=created,
         )
@@ -113,30 +105,22 @@ class TokenStore:
     def list(self) -> list[TokenRecord]:
         return list(self._records)
 
-    def verify(self, token: str, env: str | None = None) -> TokenRecord | None:
-        """Вернуть запись, если токен валиден (и, если задан, совпадает окружение).
-
-        Сравнение по хэшу — исходные токены на сервере не лежат. Проверка окружения
-        не даёт dev-токену ходить в prod и наоборот.
-        """
+    def verify(self, token: str) -> TokenRecord | None:
+        """Вернуть запись, если токен валиден (сравнение по хэшу), иначе None."""
         if not token:
             return None
         self.reload()  # выдача/отзыв через админ-UI видны без рестарта сервиса
         digest = token_hash(token)
         for r in self._records:
             if secrets.compare_digest(r.sha256, digest):
-                if env is not None and r.env != env:
-                    return None
                 return r
         return None
 
 
 def _cmd_issue(args: argparse.Namespace) -> int:
     store = TokenStore(args.store)
-    record, token = store.issue(args.label, args.env)
-    print(
-        f"id={record.id} label={record.label} env={record.env} created={record.created}"
-    )
+    record, token = store.issue(args.label)
+    print(f"id={record.id} label={record.label} created={record.created}")
     print(token)
     print(
         "^ выдай этот токен инженеру ОДИН раз — на сервере он не хранится.",
@@ -162,7 +146,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print("(нет выданных токенов)")
         return 0
     for r in records:
-        print(f"{r.id}\t{r.env}\t{r.created}\t{r.label}")
+        print(f"{r.id}\t{r.created}\t{r.label}")
     return 0
 
 
@@ -175,7 +159,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_issue = sub.add_parser("issue", help="сгенерировать и выдать токен")
     p_issue.add_argument("--label", required=True, help="кому/зачем (метка)")
-    p_issue.add_argument("--env", required=True, choices=VALID_ENVS)
     p_issue.set_defaults(func=_cmd_issue)
 
     p_revoke = sub.add_parser("revoke", help="отозвать токен по id")

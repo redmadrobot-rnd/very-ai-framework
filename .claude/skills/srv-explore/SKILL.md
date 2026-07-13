@@ -32,7 +32,7 @@ claude mcp add --transport http srv-explore <URL>/mcp \
 ```
 
 `<URL>` — как сервис доступен из твоего окружения (даёт админ). Токен привязан к
-окружению (dev/prod) — dev-токен в prod не пустят.
+конкретному серверу — на другом инстансе не пройдёт.
 
 После этого доступны MCP-инструменты `srv_explore(task)` и `srv_explore_status(job_id)`.
 

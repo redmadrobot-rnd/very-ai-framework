@@ -7,7 +7,7 @@ Agent SDK headless с readonly-агентом, а каждую Bash-команд
 Границы, которые держат «только чтение», живут ЗДЕСЬ, на сервере, вне машины инженера:
 - `guard.py` PreToolUse-мостом режет не-read (curl/ssh off: `SRV_EXPLORE_NO_NETWORK`);
 - `permission_mode="dontAsk"` + узкий `allowed_tools`;
-- bearer-токен на входе (см. token_store), привязан к окружению этого инстанса;
+- bearer-токен на входе (см. token_store), привязан к этому инстансу;
 - readonly-роль БД — фундамент (провижинится отдельно).
 
 Зависимости рантайма (claude-agent-sdk, mcp, starlette, uvicorn) импортируются лениво,
@@ -22,10 +22,18 @@ import os
 import secrets
 import subprocess
 import sys
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore.run_store import RunStore
+from srv_explore import backstop, plugin_store
+from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_GUARD = HERE / "guard.py"
@@ -34,21 +42,18 @@ ADMIN_PAGE = HERE / "admin.html"
 
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 
-# Кто запустил текущий запрос (запись инженерного токена) — выставляет BearerAuth,
-# читает tool srv_explore, чтобы пометить прогон в истории. Пробрасывается по контексту
-# запроса (middleware → MCP-обработчик — один asyncio-таск).
+# Запись инженерного токена текущего запроса: ставит BearerAuth, читает srv_explore.
 CURRENT_TOKEN: contextvars.ContextVar = contextvars.ContextVar(
     "srv_explore_token", default=None
+)
+# Команды текущего прогона: список наполняет PreToolUse-хук, забирает run_agent.
+CURRENT_STEPS: contextvars.ContextVar = contextvars.ContextVar(
+    "srv_explore_steps", default=None
 )
 
 
 def guard_path() -> Path:
     return Path(os.environ.get("SRV_EXPLORE_GUARD", str(DEFAULT_GUARD)))
-
-
-def server_env() -> str:
-    """Окружение этого инстанса (dev|prod) — идентичность деплоя, не выбор клиента."""
-    return os.environ.get("SRV_EXPLORE_ENV", "dev")
 
 
 # --- авторизация (чистая, тестируемая) ---------------------------------------
@@ -64,12 +69,12 @@ def parse_bearer(authorization: str | None) -> str | None:
     return parts[1].strip() or None
 
 
-def authorize(authorization: str | None, store: TokenStore, env: str):
-    """Вернуть валидную запись токена для окружения env, иначе None."""
+def authorize(authorization: str | None, store: TokenStore):
+    """Вернуть валидную запись токена, иначе None."""
     token = parse_bearer(authorization)
     if token is None:
         return None
-    return store.verify(token, env=env)
+    return store.verify(token)
 
 
 def admin_token() -> str | None:
@@ -125,10 +130,19 @@ def make_pretooluse_hook():
     """Async PreToolUse-хук для Agent SDK: мост к guard_decision."""
 
     async def hook(input_data, tool_use_id, context):  # noqa: ARG001 (сигнатура SDK)
-        allow, reason = guard_decision(
-            input_data.get("tool_name", ""),
-            input_data.get("tool_input", {}) or {},
-        )
+        tool = input_data.get("tool_name", "")
+        tool_input = input_data.get("tool_input", {}) or {}
+        allow, reason = guard_decision(tool, tool_input)
+        if tool == "Bash":
+            steps = CURRENT_STEPS.get()
+            if steps is not None:
+                steps.append(
+                    {
+                        "cmd": tool_input.get("command", ""),
+                        "ok": allow,
+                        "reason": "" if allow else reason,
+                    }
+                )
         if allow:
             return {}
         return {
@@ -158,8 +172,8 @@ def load_system_prompt(prompt_file: Path | None = None) -> str:
 # --- запуск агента (ленивый импорт SDK) --------------------------------------
 
 
-async def run_agent(task: str) -> str:
-    """Прогнать задачу readonly-агентом headless, вернуть финальный текст-отчёт."""
+async def run_agent(task: str) -> tuple[str, list]:
+    """Прогнать задачу readonly-агентом; вернуть (отчёт, команды сессии)."""
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
@@ -181,6 +195,8 @@ async def run_agent(task: str) -> str:
         max_turns=int(os.environ.get("SRV_EXPLORE_MAX_TURNS", "40")),
     )
 
+    steps: list = []
+    CURRENT_STEPS.set(steps)
     final_text: list[str] = []
     result: str | None = None
     async for msg in query(prompt=task, options=options):
@@ -188,49 +204,69 @@ async def run_agent(task: str) -> str:
             final_text = [b.text for b in msg.content if isinstance(b, TextBlock)]
         elif isinstance(msg, ResultMessage):
             result = msg.result
-    return result or "\n".join(final_text)
+    return result or "\n".join(final_text), steps
 
 
 # --- реестр задач (job-id + poll) --------------------------------------------
 
 
 class JobRegistry:
-    """Запуск исследований в фоне + персистентная история через RunStore.
+    """Живые прогоны в оперативе; завершённые уходят в RunStore."""
 
-    HTTP-запрос не держит длинное исследование; статус/результат/история переживают
-    рестарт (RunStore пишет JSONL), питая монитор задач и лог сессий в /admin.
-    """
-
-    def __init__(self, runs: RunStore):
+    def __init__(self, runs: RunStore, limit: int = 200):
         self.runs = runs
+        self._jobs: dict[str, dict] = {}
+        self._order: list[str] = []
+        self.limit = limit
 
-    def start(self, task: str, label: str, env: str, coro_factory) -> str:
+    def start(self, task: str, label: str, coro_factory) -> str:
         import asyncio
 
         job_id = "job_" + secrets.token_hex(6)
-        self.runs.start(job_id, task=task, label=label, env=env)
+        self._jobs[job_id] = {
+            "id": job_id,
+            "task": task,
+            "label": label,
+            "status": "running",
+            "started": _now(),
+            "finished": None,
+            "result": None,
+            "error": None,
+            "steps": [],
+        }
+        self._order.append(job_id)
+        if len(self._order) > self.limit:
+            self._jobs.pop(self._order.pop(0), None)
 
         async def runner():
+            job = self._jobs.get(job_id)
             try:
-                result = await coro_factory()
-                self.runs.finish(job_id, result=result)
+                result, steps = await coro_factory()
+                if job:
+                    job.update(
+                        status="done", result=result, steps=steps, finished=_now()
+                    )
             except Exception as e:  # noqa: BLE001 — статус задачи, не глушим молча
-                self.runs.finish(job_id, error=repr(e))
+                if job:
+                    job.update(status="error", error=repr(e), finished=_now())
+            if job:
+                self.runs.add(RunRecord(**job))
 
         asyncio.ensure_future(runner())
         return job_id
 
     def get(self, job_id: str) -> dict | None:
-        rec = self.runs.get(job_id)
-        if rec is None:
-            return None
-        return {"status": rec.status, "result": rec.result, "error": rec.error}
+        return self._jobs.get(job_id)
+
+    def running(self) -> list[dict]:
+        ordered = (self._jobs[i] for i in reversed(self._order))
+        return [j for j in ordered if j["status"] == "running"]
 
 
 # --- сборка сервера (ленивый импорт MCP/Starlette) ---------------------------
 
 
-def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
+def build_app(store: TokenStore | None = None):
     """ASGI: MCP (инженерный токен) + /admin (админ-токен). Запуск через uvicorn."""
     import contextlib
 
@@ -242,9 +278,9 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
     from starlette.routing import Mount, Route
 
     tokens = store or TokenStore()
-    run_store = runs or RunStore()
-    env = server_env()
+    run_store = RunStore()
     jobs = JobRegistry(run_store)
+    security = backstop.probe()  # один раз при старте сервиса
     mcp = FastMCP("srv-explore", streamable_http_path="/mcp")
 
     @mcp.tool()
@@ -252,9 +288,7 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
         """Запустить readonly-разведку по задаче. Вернёт job_id (поллить status)."""
         rec = CURRENT_TOKEN.get()
         label = rec.label if rec else "?"
-        job_id = jobs.start(
-            task, label=label, env=env, coro_factory=lambda: run_agent(task)
-        )
+        job_id = jobs.start(task, label=label, coro_factory=lambda: run_agent(task))
         return json.dumps({"job_id": job_id, "status": "running"}, ensure_ascii=False)
 
     @mcp.tool()
@@ -285,18 +319,12 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
         if request.method == "POST":
             body = await request.json()
             label = (body.get("label") or "").strip()
-            tok_env = (body.get("env") or env).strip()
             if not label:
                 return JSONResponse({"error": "label обязателен"}, status_code=400)
-            try:
-                record, token = tokens.issue(label, tok_env)
-            except ValueError as e:
-                return JSONResponse({"error": str(e)}, status_code=400)
+            record, token = tokens.issue(label)
             # Токен в открытую — единственный раз, показать админу и не хранить.
             return JSONResponse({"token": token, "record": _rec_dict(record)})
-        return JSONResponse(
-            {"tokens": [_rec_dict(r) for r in tokens.list()], "env": env}
-        )
+        return JSONResponse({"tokens": [_rec_dict(r) for r in tokens.list()]})
 
     async def admin_revoke(request):
         denied = _require_admin(request)
@@ -309,8 +337,36 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
         denied = _require_admin(request)
         if denied:
             return denied
+        hist = [asdict(r) for r in run_store.list_recent(100)]
+        return JSONResponse({"runs": jobs.running() + hist})
+
+    async def admin_security(request):
+        denied = _require_admin(request)
+        if denied:
+            return denied
+        return JSONResponse({"security": security, "status": backstop.status(security)})
+
+    async def admin_plugins(request):
+        denied = _require_admin(request)
+        if denied:
+            return denied
+        if request.method == "POST":
+            body = await request.json()
+            name = body.get("name", "")
+            try:
+                plugin_store.set_enabled(name, bool(body.get("enabled")))
+            except KeyError:
+                return JSONResponse({"error": "неизвестный плагин"}, status_code=404)
+            except OSError as e:
+                return JSONResponse({"error": repr(e)}, status_code=500)
+        state = plugin_store.load()
         return JSONResponse(
-            {"runs": [_run_dict(r) for r in run_store.list_recent(100)]}
+            {
+                "plugins": [
+                    {"name": n, "desc": d, "enabled": state[n]}
+                    for n, d in plugin_store.PLUGINS.items()
+                ]
+            }
         )
 
     class SplitAuth(BaseHTTPMiddleware):
@@ -318,7 +374,7 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
             path = request.url.path
             if path.startswith("/admin"):
                 return await call_next(request)  # /admin гейтит себя сам (админ-токен)
-            rec = authorize(request.headers.get("authorization"), tokens, env)
+            rec = authorize(request.headers.get("authorization"), tokens)
             if rec is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             CURRENT_TOKEN.set(rec)
@@ -337,6 +393,8 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
                 "/admin/api/tokens/{token_id}/revoke", admin_revoke, methods=["POST"]
             ),
             Route("/admin/api/runs", admin_runs),
+            Route("/admin/api/security", admin_security),
+            Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(SplitAuth)],
@@ -345,21 +403,7 @@ def build_app(store: TokenStore | None = None, runs: RunStore | None = None):
 
 
 def _rec_dict(r) -> dict:
-    return {"id": r.id, "label": r.label, "env": r.env, "created": r.created}
-
-
-def _run_dict(r) -> dict:
-    return {
-        "id": r.id,
-        "task": r.task,
-        "label": r.label,
-        "env": r.env,
-        "status": r.status,
-        "started": r.started,
-        "finished": r.finished,
-        "result": r.result,
-        "error": r.error,
-    }
+    return {"id": r.id, "label": r.label, "created": r.created}
 
 
 def main() -> int:

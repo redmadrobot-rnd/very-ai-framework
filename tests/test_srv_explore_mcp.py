@@ -28,23 +28,17 @@ def test_parse_bearer(header, expected):
     assert mcp_server.parse_bearer(header) == expected
 
 
-def test_authorize_valid_token_matching_env(tmp_path):
+def test_authorize_valid_token(tmp_path):
     store = TokenStore(tmp_path / "t.json")
-    _, token = store.issue("alice", "prod")
-    assert mcp_server.authorize(f"Bearer {token}", store, "prod") is not None
-
-
-def test_authorize_rejects_wrong_env(tmp_path):
-    store = TokenStore(tmp_path / "t.json")
-    _, token = store.issue("alice", "dev")
-    assert mcp_server.authorize(f"Bearer {token}", store, "prod") is None
+    _, token = store.issue("alice")
+    assert mcp_server.authorize(f"Bearer {token}", store) is not None
 
 
 def test_authorize_rejects_unknown_and_missing(tmp_path):
     store = TokenStore(tmp_path / "t.json")
-    store.issue("alice", "dev")
-    assert mcp_server.authorize("Bearer srvx_nope", store, "dev") is None
-    assert mcp_server.authorize(None, store, "dev") is None
+    store.issue("alice")
+    assert mcp_server.authorize("Bearer srvx_nope", store) is None
+    assert mcp_server.authorize(None, store) is None
 
 
 # --- admin-авторизация --------------------------------------------------------
@@ -67,8 +61,7 @@ def test_admin_authorized_matches(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _audit_to_tmp(tmp_path, monkeypatch):
-    monkeypatch.setenv("SRV_EXPLORE_AUDIT", str(tmp_path / "audit.log"))
+def _utf8(monkeypatch):
     monkeypatch.setenv("PYTHONUTF8", "1")
 
 

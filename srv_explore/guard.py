@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""srv-explore — PreToolUse-гард + аудит.
+"""srv-explore — PreToolUse-гард.
 
 Вешается в frontmatter субагента на инструмент Bash. Читает PreToolUse-JSON со
-stdin, сверяет команду с allowlist (только чтение), пишет строку в аудит-лог ДО
-решения и возвращает:
+stdin, сверяет команду с allowlist (только чтение) и возвращает:
     allow → JSON permissionDecision=allow, exit 0;
     deny  → причина в stderr + JSON permissionDecision=deny, exit 2 (hard block).
 
@@ -22,12 +21,12 @@ date -s). Поэтому: allowlist имён + per-command проверка оп
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
 import shlex
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
@@ -44,6 +43,30 @@ PROFILES = HERE / "profiles"
 DANGEROUS = ["`", "$(", ">", "<", ";", "&", "\n", "\r"]
 
 DB_CLIENTS = ("psql", "mysql", "mongosh", "clickhouse-client", "redis-cli")
+
+# Плагины: семейства команд, чей эффект уходит за пределы OS-песочницы.
+# Выключен/отсутствует → deny. Состояние — plugins.json (тумблеры в админке).
+PLUGIN_OF = {
+    "docker": "docker", "docker-compose": "docker",
+    "psql": "postgres", "mysql": "mysql", "clickhouse-client": "clickhouse",
+    "mongosh": "mongo", "redis-cli": "redis", "rabbitmqctl": "rabbitmq",
+    "curl": "http", "ssh": "ssh",
+}
+KNOWN_PLUGINS = tuple(dict.fromkeys(PLUGIN_OF.values()))
+DEFAULT_PLUGINS_PATH = "/var/lib/srv-explore/plugins.json"
+_plugins_cache: dict | None = None
+
+
+def plugin_enabled(plugin: str) -> bool:
+    global _plugins_cache
+    if _plugins_cache is None:
+        path = os.environ.get("SRV_EXPLORE_PLUGINS", DEFAULT_PLUGINS_PATH)
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        _plugins_cache = {p: bool(data.get(p, True)) for p in KNOWN_PLUGINS}
+    return _plugins_cache.get(plugin, False)
 
 # Спецфайлы, чтение которых блокируем: сырые устройства и бесконечные источники
 # (/dev/zero|random|sd*|mem…) вешают/эксфильтрируют. Разрешаем только безобидные.
@@ -84,27 +107,6 @@ CURL_LONG_VALUE = {
 # (кастомный конфиг → ProxyCommand), -L/-R/-D/-W/-J (туннели), -E (лог в файл).
 SSH_BOOL_FLAGS = {"-q", "-T", "-C", "-4", "-6", "-v", "-x"}
 SSH_VALUE_FLAGS = {"-p", "-i", "-l", "-c", "-m", "-b"}
-
-
-def audit(session: str, command: str, decision: str, reason: str) -> None:
-    # Аудит команд опционален: пишем только если задан SRV_EXPLORE_AUDIT. По дефолту
-    # молчим (enforcement держит гард, не запись) — файл не пухнет, чистить нечего.
-    log_path = os.environ.get("SRV_EXPLORE_AUDIT")
-    if not log_path:
-        return
-    try:
-        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-        rec = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "session": session,
-            "command": command,
-            "decision": decision,
-            "reason": reason,
-        }
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
-        pass  # аудит не должен ронять гард, но и не должен молча открывать запись
 
 
 def load_json(name: str) -> dict:
@@ -312,9 +314,30 @@ def check_redis_client(argv: list[str], prof: dict) -> tuple[bool, str]:
     return False, 'redis-cli: интерактив без команды запрещён — используй "GET key" и т.п.'
 
 
-# --- curl (allowlist безопасного GET) ----------------------------------------
+# --- curl (allowlist безопасного GET, назначение — внутренняя сеть) -----------
 
-def check_curl(argv: list[str]) -> tuple[bool, str]:
+def url_host(url: str) -> str:
+    u = url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+    if "@" in u:
+        u = u.rsplit("@", 1)[1]
+    if u.startswith("["):
+        return u[1:u.find("]")].lower() if "]" in u else ""
+    return u.split(":", 1)[0].lower()
+
+
+def host_internal(host: str) -> bool:
+    """Приватный/loopback IP или короткое имя без точек = внутренняя сеть."""
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return "." not in host
+
+
+def check_curl(argv: list[str], shell: dict) -> tuple[bool, str]:
+    urls: list[str] = []
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -354,8 +377,19 @@ def check_curl(argv: list[str]) -> tuple[bool, str]:
                 i += 2
                 continue
             return False, f"curl: флаг {a} не в allowlist безопасного GET (fail-closed)"
-        i += 1  # позиционный (URL)
-    return True, "curl GET"
+        urls.append(a)
+        i += 1
+    if not urls:
+        return False, "curl без URL"
+    allow_ext = [h.lower() for h in shell.get("http_external_allow", [])]
+    for u in urls:
+        host = url_host(u)
+        if not host_internal(host) and host not in allow_ext:
+            return False, (
+                f"curl {host}: внешний хост запрещён (внутренняя сеть свободно, "
+                f"внешнее — только из http_external_allow)"
+            )
+    return True, "curl GET (internal)"
 
 
 # --- docker ------------------------------------------------------------------
@@ -406,6 +440,8 @@ def check_docker(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         return check_compose(argv[1:], shell)
     sub, rest = subcommand(argv[1:], DOCKER_VALUE_FLAGS)
     if sub is None:
+        if any(a in ("--version", "-v") for a in argv[1:]):
+            return True, "docker --version"
         return False, "docker без подкоманды"
     if sub == "compose":
         return check_compose(rest, shell)
@@ -417,6 +453,13 @@ def check_docker(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         if sub == "stats" and "--no-stream" not in rest:
             return False, "docker stats без --no-stream стримит; добавь --no-stream"
         return True, f"docker {sub}"
+    noun_reads = shell.get("docker_noun_reads", {})
+    if sub in noun_reads:
+        verb, _ = subcommand(rest, set())
+        if verb in noun_reads[sub]:
+            return True, f"docker {sub} {verb}"
+        ok = ", ".join(noun_reads[sub])
+        return False, f"docker {sub} {verb}: не read-only (разрешены: {ok})"
     allowed = ", ".join(shell.get("docker_read_subcommands", []))
     return False, f"docker {sub}: не read-only (разрешены: {allowed}; exec с read-командой; compose)"
 
@@ -466,7 +509,47 @@ def check_ssh(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     return False, "ssh без хоста"
 
 
-# --- generic -----------------------------------------------------------------
+# --- generic (data-driven per-command rules) ---------------------------------
+
+def check_command_rule(name: str, argv: list[str], rule: dict) -> tuple[bool, str]:
+    """Декларативное правило для бинаря конкретного сервера (данные, не движок).
+
+    read_verbs — первый позиционный должен быть read-глаголом (`ufw status`).
+    allow_flags — whitelist флагов, любой другой = deny (`nginx -v`); value_flags
+    съедают следующий токен; require_flag обязателен, если задан.
+    """
+    rest = argv[1:]
+    value_flags = set(rule.get("value_flags", []))
+    read_verbs = rule.get("read_verbs")
+    allow_flags = rule.get("allow_flags")
+    if read_verbs is not None:
+        verb, _ = subcommand(rest, value_flags)
+        if verb in read_verbs:
+            return True, f"{name} {verb} (read)"
+        return False, f"{name}: только read-подкоманды ({', '.join(read_verbs)})"
+    if allow_flags is not None:
+        require = rule.get("require_flag")
+        seen, i = [], 0
+        while i < len(rest):
+            a = rest[i]
+            if a in value_flags:
+                i += 2
+                continue
+            if a.startswith("-"):
+                base = a.split("=", 1)[0]
+                if base not in allow_flags:
+                    return False, f"{name}: разрешены только {', '.join(allow_flags)}"
+                seen.append(base)
+                i += 1
+                continue
+            return False, f"{name}: неожиданный аргумент {a!r} (только чтение)"
+        if not seen:
+            return False, f"{name}: нужен read-флаг ({', '.join(allow_flags)})"
+        if require and require not in seen:
+            return False, f"{name}: обязателен {require}"
+        return True, f"{name} (read)"
+    return True, f"{name} (read)"
+
 
 def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     if not argv:
@@ -479,10 +562,13 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     # наружу. DB-клиенты не режем — чтение БД идёт в readonly-роль, это цель.
     if name in ("curl", "ssh") and os.environ.get("SRV_EXPLORE_NO_NETWORK"):
         return False, f"{name}: сетевые команды отключены (SRV_EXPLORE_NO_NETWORK) — egress закрыт"
+    plugin = PLUGIN_OF.get(name)
+    if plugin and not plugin_enabled(plugin):
+        return False, f"плагин '{plugin}' выключен админом — {name} запрещён"
     if name in DB_CLIENTS:
         return check_db_client(argv)
     if name == "curl":
-        return check_curl(argv)
+        return check_curl(argv, shell)
     if name in ("docker", "docker-compose"):
         return check_docker(argv, shell, depth)
     if name == "systemctl":
@@ -536,6 +622,9 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
         if any(a in bad or a.split("=", 1)[0] in bad for a in argv[1:]):
             return False, "yq -i/--split-exp пишет файлы — запрещено"
         return True, "yq (read)"
+    rules = shell.get("command_rules", {})
+    if name in rules:
+        return check_command_rule(name, argv, rules[name])
     if name in shell.get("read_commands", []):
         return True, f"{name} (read)"
     return False, f"команда '{name}' не в allowlist read-команд"
@@ -581,17 +670,14 @@ def main() -> int:
     except ValueError:
         print("srv-explore guard: не разобран PreToolUse JSON — блок (fail-closed)", file=sys.stderr)
         return 2
-    session = payload.get("session_id", "-")
     if payload.get("tool_name") != "Bash":
         return 0
     command = (payload.get("tool_input") or {}).get("command", "")
     if not command.strip():
-        audit(session, command, "deny", "пустая команда")
         print("srv-explore guard: пустая команда", file=sys.stderr)
         return 2
     shell = load_json("shell.json")
     ok, reason = check_command_string(command, shell)
-    audit(session, command, "allow" if ok else "deny", reason)
     if ok:
         emit("allow", reason)
         return 0

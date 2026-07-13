@@ -1,17 +1,35 @@
 {
-  "note": "Allowlist read-команд для гарда (default-deny). Разрешить ИМЯ команды недостаточно — у ряда утилит есть write/exec/exfil-флаги, они проверяются в guard.py per-command: sort -o, date -s, netstat -c, yq -i/--split-exp, curl (allowlist безопасного GET), ssh (allowlist флагов, без -o/-F/туннелей = локальное исполнение через ProxyCommand). Исключены намеренно: интерпретаторы sed/awk (пишут sed w / awk print>, исполняют sed e / awk system|getline), env (исполняет команду), DNS-резолверы dig/nslookup/host/getent и hostname (эксфильтрация через DNS / смена хоста — egress вне зоны гарда, полагаемся на egress-контроль хоста). Чтение /dev/* и /proc/kcore блокируется (сырое устройство/бесконечный источник). docker/systemctl — verb-dispatch: только перечисленные read-подкоманды (noun-формы image/context/system/volume/network НЕ включены — у них write-подкоманды). docker exec — рекурсивная проверка вложенной команды. tail/journalctl -f, docker logs -f, docker stats без --no-stream — блок как зависание.",
+  "note": "Allowlist read-команд для гарда (default-deny). Разрешить ИМЯ команды недостаточно — у ряда утилит есть write/exec/exfil-флаги, они проверяются в guard.py per-command: sort -o, date -s, netstat -c, yq -i/--split-exp, curl (allowlist безопасного GET), ssh (allowlist флагов, без -o/-F/туннелей = локальное исполнение через ProxyCommand). Исключены намеренно: интерпретаторы sed/awk (пишут sed w / awk print>, исполняют sed e / awk system|getline), env (исполняет команду), DNS-резолверы dig/nslookup/host/getent и hostname (эксфильтрация через DNS / смена хоста — egress вне зоны гарда, полагаемся на egress-контроль хоста). Чтение /dev/* и /proc/kcore блокируется (сырое устройство/бесконечный источник). docker/systemctl — verb-dispatch: только перечисленные read-подкоманды. Noun-формы (system/image/volume/network/…) — только их read-глаголы из docker_noun_reads (df/ls/inspect), write (prune/rm) режется. docker exec — рекурсивная проверка вложенной команды. tail/journalctl -f, docker logs -f, docker stats без --no-stream — блок как зависание. Бинари конкретного сервера (nginx/ufw/… — то, что варьируется от стенда к стенду) описываются декларативно в command_rules (read_verbs — только read-подкоманда; allow_flags — whitelist флагов + value_flags/require_flag), движок читает их generically: новый серверный инструмент = запись в этот JSON, код не трогаем.",
   "read_commands": [
     "cat", "ls", "grep", "egrep", "fgrep", "head", "tail", "wc", "sort",
     "uniq", "cut", "tr", "jq", "yq", "stat", "date", "echo", "printf",
     "column", "nl", "tac", "comm", "diff", "df", "free", "uptime",
     "whoami", "id", "ps", "pgrep",
     "journalctl", "ss", "netstat", "lsof", "du", "tree", "readlink", "realpath",
-    "file", "zcat", "uname", "which", "basename", "dirname"
+    "file", "zcat", "uname", "which", "basename", "dirname",
+    "nproc", "arch", "lscpu", "lsblk", "lsmem", "getconf", "lsb_release",
+    "dpkg-query"
   ],
   "docker_read_subcommands": [
     "ps", "inspect", "logs", "images", "stats", "top", "port",
     "version", "info", "df", "history"
   ],
+  "http_external_allow": [],
+  "command_rules": {
+    "nginx": { "allow_flags": ["-v", "-V", "-t", "-T"] },
+    "ufw": { "read_verbs": ["status", "show", "version"] },
+    "crontab": { "allow_flags": ["-l", "-u"], "value_flags": ["-u"], "require_flag": "-l" }
+  },
+  "docker_noun_reads": {
+    "system": ["df", "info"],
+    "image": ["ls", "inspect", "history"],
+    "container": ["ls", "inspect", "port", "diff"],
+    "volume": ["ls", "inspect"],
+    "network": ["ls", "inspect"],
+    "context": ["ls", "inspect", "show"],
+    "node": ["ls", "inspect"],
+    "config": ["ls", "inspect"]
+  },
   "docker_compose_read_subcommands": [
     "ps", "logs", "config", "top", "images", "version"
   ],

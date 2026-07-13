@@ -73,17 +73,49 @@
 
   details summary { cursor: pointer; color: var(--acc); }
   details summary:hover { color: var(--acc-h); }
-  details pre { margin-top: .5rem; padding: .7rem .8rem; background: var(--surface2); border: 1px solid var(--bd); border-radius: 8px; }
+  details pre { margin-top: .3rem; padding: .7rem .8rem; background: var(--surface2); border: 1px solid var(--bd); border-radius: 8px; }
+  .steps { display: flex; flex-direction: column; gap: .25rem; margin-top: .4rem; }
+  .step { display: flex; align-items: baseline; gap: .5rem; }
+  .step .st { flex: none; }
+  /* раскрываемая история */
+  th.chevcol, td.chevcol { width: 1.4rem; padding-right: 0; }
+  .srow { cursor: pointer; }
+  .srow:hover td { background: #ffffff08; }
+  .chev { display: inline-block; color: var(--mut); transition: transform .12s; user-select: none; }
+  .chev.open { transform: rotate(90deg); }
+  .drow > td { padding: 0; border-bottom: 1px solid var(--bd); }
+  .detail { padding: .8rem 1rem 1.1rem 2.4rem; background: var(--surface2); }
+  details.cmds > summary { color: var(--acc); font-size: .9rem; }
 
   #authmsg { font-size: .85rem; }
   .gap { margin-top: 1rem; }
+
+  #chips { margin-left: auto; display: inline-flex; gap: .5rem; align-self: center; }
+  .chip { display: inline-flex; align-items: center; gap: .4rem; font-size: .76rem;
+    color: var(--mut); cursor: help; border: 1px solid var(--bd);
+    border-radius: 999px; padding: .14rem .62rem; }
+  .chip .dotc { font-size: .7rem; line-height: 1; }
+  .chip.green .dotc, .chip.green b { color: var(--green); }
+  .chip.red   .dotc, .chip.red   b { color: var(--red); }
+  .chip b { font-weight: 600; }
+
+  .sw { position: relative; display: inline-block; width: 34px; height: 19px; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw i { position: absolute; inset: 0; background: #30363d; border-radius: 999px; transition: .15s; }
+  .sw i:before { content: ""; position: absolute; width: 13px; height: 13px; left: 3px; top: 3px;
+    background: #8b949e; border-radius: 50%; transition: .15s; }
+  .sw input:checked + i { background: #1f6feb; }
+  .sw input:checked + i:before { transform: translateX(15px); background: #fff; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>srv-explore <span class="dot">·</span> admin</h1>
-    <span class="badge">env: <b id="env">—</b></span>
+    <span id="chips" style="display:none">
+      <span id="chip-fs" class="chip"><span class="dotc">●</span>FileSystem: <b>…</b></span>
+      <span id="chip-net" class="chip"><span class="dotc">●</span>Network: <b>…</b></span>
+    </span>
   </header>
   <p class="sub">Управление доступом, история сессий и аудит — без SSH к серверу.</p>
 
@@ -98,18 +130,22 @@
     <div class="card">
       <div class="bar">
         <input id="lbl" placeholder="кому / зачем (label)" size="24">
-        <select id="tenv"></select>
         <button class="primary" onclick="issue()">Выпустить токен</button>
       </div>
       <div id="issued"></div>
       <div class="gap tbl-card">
-        <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>env</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
+        <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
       </div>
+    </div>
+
+    <h2>Плагины <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— выключен = запрещён</span></h2>
+    <div class="card tbl-card">
+      <table id="plugtbl"><thead><tr><th>плагин</th><th>что разрешает</th><th></th></tr></thead><tbody></tbody></table>
     </div>
 
     <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 15 на юзера</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
     <div class="card tbl-card">
-      <table id="runtbl"><thead><tr><th>время</th><th>кто</th><th>задача</th><th>статус</th><th>итог</th></tr></thead><tbody></tbody></table>
+      <table id="runtbl"><thead><tr><th class="chevcol"></th><th>время</th><th>кто</th><th>задача</th><th>статус</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 </div>
@@ -138,6 +174,8 @@ async function boot() {
     $("#app").style.display = "";
     $("#authmsg").textContent = "";
     $("#authmsg").className = "muted";
+    loadSecurity();
+    loadPlugins();
     loadRuns();
   } catch (e) {
     $("#app").style.display = "none";
@@ -146,31 +184,69 @@ async function boot() {
   }
 }
 
+function setChip(id, state, val, tip) {
+  const c = $(id);
+  c.className = "chip " + state;
+  c.querySelector("b").textContent = val;
+  c.title = tip;
+}
+
+async function loadSecurity() {
+  try {
+    const d = await (await api("/admin/api/security")).json();
+    const st = d.status || "unknown";
+    if (st === "green") setChip("#chip-fs", "green", "safe", "Read-only на уровне ядра — запись невозможна.");
+    else if (st === "red") setChip("#chip-fs", "red", "unsafe", "ФС доступна на запись — подними через штатный systemd-юнит.");
+    else setChip("#chip-fs", "", "unknown", "Режим не определить (не Linux).");
+    $("#chips").style.display = "";
+  } catch (e) { $("#chips").style.display = "none"; }
+}
+
+function setNetChip(plugins) {
+  const http = plugins.find(p => p.name === "http");
+  if (http && http.enabled) setChip("#chip-net", "green", "safe", "Только GET/HEAD; внутренняя сеть свободно, внешнее — по allowlist.");
+  else setChip("#chip-net", "green", "closed", "Плагин http выключен — сетевые запросы агенту запрещены.");
+}
+
+async function loadPlugins() {
+  const d = await (await api("/admin/api/plugins")).json();
+  setNetChip(d.plugins);
+  const tb = $("#plugtbl tbody"); tb.innerHTML = "";
+  for (const p of d.plugins) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td><td class="muted">${esc(p.desc)}</td>
+      <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
+        onchange="togglePlugin('${esc(p.name)}', this.checked)"><i></i></label></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+async function togglePlugin(name, enabled) {
+  const r = await api("/admin/api/plugins", { method: "POST", body: JSON.stringify({ name, enabled }) });
+  if (!r.ok) { alert((await r.json()).error || "ошибка"); }
+  loadPlugins();
+}
+
 async function loadTokens() {
   const d = await (await api("/admin/api/tokens")).json();
-  $("#env").textContent = d.env;
-  const sel = $("#tenv");
-  if (!sel.options.length) {
-    for (const e of ["dev", "prod"]) { const o = document.createElement("option"); o.value = o.textContent = e; if (e === d.env) o.selected = true; sel.appendChild(o); }
-  }
   const tb = $("#toktbl tbody"); tb.innerHTML = "";
   for (const t of d.tokens) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><code class="id">${esc(t.id)}</code></td><td>${esc(t.label)}</td><td><span class="pill">${esc(t.env)}</span></td><td class="muted">${esc(t.created)}</td>
+    tr.innerHTML = `<td><code class="id">${esc(t.id)}</code></td><td>${esc(t.label)}</td><td class="muted">${esc(t.created)}</td>
       <td><button class="danger" onclick="revoke('${esc(t.id)}')">отозвать</button></td>`;
     tb.appendChild(tr);
   }
-  if (!d.tokens.length) tb.innerHTML = `<tr><td colspan="5" class="muted">нет выданных токенов</td></tr>`;
+  if (!d.tokens.length) tb.innerHTML = `<tr><td colspan="4" class="muted">нет выданных токенов</td></tr>`;
 }
 
 async function issue() {
   const label = $("#lbl").value.trim();
   if (!label) { alert("укажи label"); return; }
-  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label, env: $("#tenv").value }) });
+  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label }) });
   const d = await r.json();
   if (!r.ok) { alert(d.error || "ошибка"); return; }
   $("#lbl").value = "";
-  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> (${esc(d.record.env)}) — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code></div>`;
+  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code></div>`;
   loadTokens();
 }
 
@@ -184,12 +260,34 @@ async function loadRuns() {
   const d = await (await api("/admin/api/runs")).json();
   const tb = $("#runtbl tbody"); tb.innerHTML = "";
   for (const r of d.runs) {
-    const out = r.status === "error" ? `<span class="err">${esc(r.error)}</span>`
-      : (r.result ? `<details><summary>показать</summary><pre>${esc(r.result)}</pre></details>` : "—");
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="muted">${esc(r.started)}</td><td>${esc(r.label)}</td><td>${esc(r.task)}</td>
-      <td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td><td>${out}</td>`;
-    tb.appendChild(tr);
+    const n = r.steps ? r.steps.length : 0;
+    const cmds = n
+      ? `<div class="steps">` + r.steps.map(s =>
+          `<div class="step"><span class="st ${s.ok ? "done" : "error"}">${s.ok ? "ok" : "deny"}</span> <code>${esc(s.cmd)}</code>${s.ok ? "" : ` <span class="muted">${esc(s.reason)}</span>`}</div>`
+        ).join("") + `</div>`
+      : `<div class="muted">команд нет</div>`;
+    const ans = r.error ? `<pre class="err">${esc(r.error)}</pre>`
+      : (r.result ? `<pre>${esc(r.result)}</pre>` : `<div class="muted">—</div>`);
+    const detail =
+      `<details class="cmds"><summary>команды (${n})</summary>${cmds}</details>` +
+      `<div class="muted" style="margin:.7rem 0 .2rem">ответ:</div>${ans}`;
+
+    const srow = document.createElement("tr");
+    srow.className = "srow";
+    srow.innerHTML = `<td class="chevcol"><span class="chev">▸</span></td>
+      <td class="muted">${esc(r.started)}</td><td>${esc(r.label)}</td><td>${esc(r.task)}</td>
+      <td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td>`;
+    const drow = document.createElement("tr");
+    drow.className = "drow";
+    drow.style.display = "none";
+    drow.innerHTML = `<td colspan="5"><div class="detail">${detail}</div></td>`;
+    srow.addEventListener("click", () => {
+      const open = drow.style.display !== "none";
+      drow.style.display = open ? "none" : "";
+      srow.querySelector(".chev").classList.toggle("open", !open);
+    });
+    tb.appendChild(srow);
+    tb.appendChild(drow);
   }
   if (!d.runs.length) tb.innerHTML = `<tr><td colspan="5" class="muted">пока нет прогонов</td></tr>`;
 }

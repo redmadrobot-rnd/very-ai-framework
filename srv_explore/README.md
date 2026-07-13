@@ -55,14 +55,14 @@ sudo systemctl restart srv-explore
 одноразовый **админ-токен** (`adm_…`) — им гейтится `/admin`.
 
 Основной путь — веб-панель `/admin` (тем же `<URL>`, что и MCP): ввести админ-токен →
-«Выпустить токен» (label = кому/зачем, env) → скопировать показанный **один раз**
-`srvx_…` и отдать инженеру. Там же — отзыв, список, история сессий, аудит.
+«Выпустить токен» (label = кому/зачем) → скопировать показанный **один раз**
+`srvx_…` и отдать инженеру. Там же — отзыв, список, история сессий (задача → ответ).
 
 CLI как fallback (от сервис-юзера, чтобы владение `tokens.json` не уезжало на root):
 
 ```bash
 sudo -u srv-explore /opt/srv-explore/venv/bin/python -m srv_explore.token_store \
-  --store /var/lib/srv-explore/tokens.json issue --label alice --env dev
+  --store /var/lib/srv-explore/tokens.json issue --label alice
 # отозвать: ... revoke <id>; список: ... list
 ```
 
@@ -73,22 +73,21 @@ claude mcp add --transport http srv-explore <URL>/mcp \
   --header "Authorization: Bearer srvx_..."
 ```
 
-Сервер сверяет `sha256` токена и окружение на каждый запрос; нет совпадения/revoked → 401.
+Сервер сверяет `sha256` токена на каждый запрос; нет совпадения/revoked → 401. Токен
+привязан к инстансу: его хэш есть только в этом `tokens.json`, на другом сервере не пройдёт.
 
 ## Конфиг (`/etc/srv-explore/env`)
 
-`SRV_EXPLORE_ENV` (dev|prod — идентичность инстанса, к ней привязан токен) ·
 `SRV_EXPLORE_NO_NETWORK=1` (egress закрыт) · `SRV_EXPLORE_HOST`/`PORT` (bind) ·
 `SRV_EXPLORE_GUARD`/`PROMPT`/`CWD` · `SRV_EXPLORE_TOKENS`/`SRV_EXPLORE_RUNS`
 (хэши токенов и история — в `/var/lib/srv-explore`, единственный писатель = сервис-юзер) ·
 `SRV_EXPLORE_HISTORY_PER_USER` (сколько сессий на юзера хранить, дефолт 15) ·
 `CLAUDE_CODE_OAUTH_TOKEN` (авторизация модели, секрет, пишет деплой) ·
-`SRV_EXPLORE_ADMIN_TOKEN` (гейт `/admin`; генерит `install.sh` один раз) ·
-`SRV_EXPLORE_AUDIT` (путь лога команд — **опционально**; не задан → аудит не пишется).
+`SRV_EXPLORE_ADMIN_TOKEN` (гейт `/admin`; генерит `install.sh` один раз).
 
-Что пишем на диск: `tokens.json` (хэши) и `runs.json` (история, кап на юзера) в
-`/var/lib/srv-explore`; аудит команд — только если задан `SRV_EXPLORE_AUDIT`. Роста нет:
-история подрезается капом, аудит по дефолту off (включают под комплаенс).
+Что пишем на диск: `tokens.json` (хэши) и `runs.json` (история сессий, кап на юзера) в
+`/var/lib/srv-explore`. Роста нет — история подрезается капом; живая сессия в памяти,
+в файл уходит по завершении.
 
 Как сервис доступен инженеру (TLS-прокси, VPN, локальный проброс, …) — задача
 окружения, вне бандла. Бандлу нужен лишь достижимый `<URL>` + токен.

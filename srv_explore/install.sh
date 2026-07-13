@@ -6,18 +6,16 @@
 # /etc/srv-explore/env (см. README).
 #
 # Использование:
-#   sudo SRV_EXPLORE_ENV=dev bash srv_explore/install.sh
+#   sudo bash srv_explore/install.sh
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # каталог бандла (srv_explore/)
-ENV_NAME="${SRV_EXPLORE_ENV:-dev}"
 APP_DIR=/opt/srv-explore
 CFG_DIR=/etc/srv-explore
-LOG_DIR=/var/log/srv-explore
-STATE_DIR=/var/lib/srv-explore   # writable: tokens.json + runs.jsonl (админ-UI пишет их)
+STATE_DIR=/var/lib/srv-explore   # writable: tokens.json + runs.json
 USER_NAME=srv-explore
 
-echo "==> srv-explore install (env=$ENV_NAME, src=$SRC)"
+echo "==> srv-explore install (src=$SRC)"
 
 # 1. ro OS-пользователь (без логина), в группах для чтения docker/journal/логов
 if ! id "$USER_NAME" >/dev/null 2>&1; then
@@ -28,7 +26,7 @@ for grp in docker systemd-journal adm; do
 done
 
 # 2. каталоги
-install -d -o "$USER_NAME" -g "$USER_NAME" "$APP_DIR" "$LOG_DIR"
+install -d -o "$USER_NAME" -g "$USER_NAME" "$APP_DIR"
 install -d -m 0750 -o "$USER_NAME" -g "$USER_NAME" "$CFG_DIR"
 # state: сервис-юзер пишет сюда (токены/история); StateDirectory в юните тоже создаёт
 install -d -m 0750 -o "$USER_NAME" -g "$USER_NAME" "$STATE_DIR"
@@ -59,7 +57,6 @@ chown -R "$USER_NAME:$USER_NAME" "$APP_DIR/venv"
 # 5. env-файл (несекретные дефолты; CLAUDE_CODE_OAUTH_TOKEN дописывает деплой)
 if [ ! -f "$CFG_DIR/env" ]; then
   cat > "$CFG_DIR/env" <<EOF
-SRV_EXPLORE_ENV=$ENV_NAME
 SRV_EXPLORE_NO_NETWORK=1
 SRV_EXPLORE_HOST=127.0.0.1
 SRV_EXPLORE_PORT=8765
@@ -71,14 +68,12 @@ SRV_EXPLORE_RUNS=$STATE_DIR/runs.json
 SRV_EXPLORE_HISTORY_PER_USER=15
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели для агента) — дописывает деплой, не коммитить.
 # SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
-# SRV_EXPLORE_AUDIT=$LOG_DIR/explore.log — аудит команд ОПЦИОНАЛЕН: раскомментируй,
-#   чтобы гард писал allow/deny в лог (для комплаенса). По дефолту off — не пухнет.
 EOF
   chmod 0640 "$CFG_DIR/env"
   chown root:"$USER_NAME" "$CFG_DIR/env"
 fi
 
-# 5b. ключи, которых может не быть в уже существующем env (идемпотентно, без перезаписи)
+# 5b. ключи, которых может не быть в уже существующем env (идемпотентно)
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
 ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.json"
 ensure_env_kv SRV_EXPLORE_HISTORY_PER_USER 15
@@ -105,4 +100,4 @@ systemctl restart srv-explore.service
 echo "==> готово. Статус: systemctl status srv-explore --no-pager"
 echo "    Управление токенами: открой http://<host>:<port>/admin (админ-токен выше)."
 echo "    Либо CLI от сервис-юзера:"
-echo "    sudo -u $USER_NAME $APP_DIR/venv/bin/python -m srv_explore.token_store --store $STATE_DIR/tokens.json issue --label <кто> --env $ENV_NAME"
+echo "    sudo -u $USER_NAME $APP_DIR/venv/bin/python -m srv_explore.token_store --store $STATE_DIR/tokens.json issue --label <кто>"
