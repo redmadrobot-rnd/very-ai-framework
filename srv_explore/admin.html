@@ -295,7 +295,10 @@ async function addUser() {
   const d = await r.json();
   if (!r.ok) { alert(d.error || "ошибка"); return; }
   $("#lbl").value = ""; $("#pubkey").value = "";
-  $("#issued").innerHTML = `<div class="tok">Юзер <b>${esc(d.label)}</b> добавлен. Отдай инженеру ссылку — токен он получит сам:<br><code>http://${esc(d.host)}:8765/</code> (через туннель — http://localhost:8765/)</div>`;
+  $("#issued").innerHTML = `<div class="tok">Юзер <b>${esc(d.label)}</b> добавлен. Токен — <b>покажется один раз</b>. Отдай инженеру токен и команды:<br><code>${esc(d.token)}</code>
+    <pre style="margin-top:.6rem">ssh -N -L 8765:localhost:8765 srvx-tunnel@${esc(d.host)} -i ~/.ssh/srvx
+claude mcp add --transport http srv-explore http://localhost:8765/mcp \\
+  --header "Authorization: Bearer ${esc(d.token)}"</pre></div>`;
   loadUsers();
 }
 

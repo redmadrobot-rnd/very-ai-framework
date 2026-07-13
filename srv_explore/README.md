@@ -96,13 +96,13 @@ claude mcp add --transport http srv-explore <URL>/mcp \
 ровно один проброс (`PermitOpen 127.0.0.1:8765`, no shell/tty/agent). Ключи инженеров
 живут в `/var/lib/srv-explore/tunnel_keys` (sshd читает `AuthorizedKeysCommand`'ом),
 поэтому доступ выдаётся из админки: **«Добавить юзера»** = label + публичный ключ →
-токен + готовая инструкция подключения. Отзыв токена снимает и ключ. Инструкция для
-инженера — публичная страница `/` самого сервиса.
+токен + готовые команды подключения (скопировать инженеру). Удаление юзера снимает
+ключ и все его токены. Сервис наружу не торчит — только loopback + туннель.
 
 Инженер держит туннель и ходит в MCP через localhost:
 
 ```bash
-ssh -N -L 8765:localhost:8765 srvx-tunnel@<host> -i <key>
+ssh -N -L 8765:localhost:8765 srvx-tunnel@<host> -i ~/.ssh/srvx
 claude mcp add --transport http srv-explore http://localhost:8765/mcp \
   --header "Authorization: Bearer srvx_..."
 ```

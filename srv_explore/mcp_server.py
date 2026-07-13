@@ -16,7 +16,6 @@ Agent SDK headless с readonly-агентом, а каждую Bash-команд
 
 from __future__ import annotations
 
-import base64
 import contextvars
 import json
 import os
@@ -27,7 +26,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, key_auth, plugin_store, tunnel_keys
+from srv_explore import backstop, plugin_store, tunnel_keys
 from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
 
@@ -40,7 +39,6 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_GUARD = HERE / "guard.py"
 DEFAULT_PROMPT = HERE / "agent_prompt.md"
 ADMIN_PAGE = HERE / "admin.html"
-CONNECT_PAGE = HERE / "connect.html"
 
 
 def public_host() -> str:
@@ -306,38 +304,6 @@ def build_app(store: TokenStore | None = None):
             return json.dumps({"error": "unknown job_id"}, ensure_ascii=False)
         return json.dumps(job, ensure_ascii=False)
 
-    # --- self-serve токен по ключу (гейт — подпись, не админ-токен) ---
-    async def token_challenge(request):  # noqa: ARG001
-        return JSONResponse({"nonce": key_auth.new_challenge()})
-
-    async def token_redeem(request):
-        body = await request.json()
-        pubkey = (body.get("pubkey") or "").strip()
-        nonce = (body.get("nonce") or "").strip()
-        signature = body.get("signature") or ""
-        if not signature and body.get("signature_b64"):
-            try:
-                signature = base64.b64decode(body["signature_b64"]).decode()
-            except (ValueError, UnicodeDecodeError):
-                return JSONResponse({"error": "signature_b64 битый"}, status_code=400)
-        if not (pubkey and nonce and signature):
-            return JSONResponse(
-                {"error": "нужны pubkey, nonce, signature"}, status_code=400
-            )
-        if not key_auth.consume_challenge(nonce):
-            return JSONResponse(
-                {"error": "nonce неизвестен или протух — возьми новый"},
-                status_code=400,
-            )
-        label = key_auth.verify(pubkey, nonce, signature)
-        if label is None:
-            return JSONResponse(
-                {"error": "подпись не подтверждена (ключ не зарегистрирован?)"},
-                status_code=401,
-            )
-        _, token = tokens.issue(label)
-        return JSONResponse({"token": token, "label": label})
-
     # --- /admin: HTML-оболочка публична, данные — за админ-токеном ---
     def _require_admin(request):
         if not admin_authorized(request.headers.get("authorization")):
@@ -350,13 +316,6 @@ def build_app(store: TokenStore | None = None):
         except OSError:
             html = "<h1>srv-explore admin</h1><p>admin.html не найден</p>"
         return HTMLResponse(html)
-
-    async def connect_page(request):  # noqa: ARG001
-        try:
-            html = CONNECT_PAGE.read_text(encoding="utf-8")
-        except OSError:
-            html = "<h1>srv-explore</h1><p>connect.html не найден</p>"
-        return HTMLResponse(html.replace("{{HOST}}", public_host()))
 
     async def admin_users(request):
         denied = _require_admin(request)
@@ -374,8 +333,9 @@ def build_app(store: TokenStore | None = None):
                 tunnel_keys.add(label, pubkey)
             except ValueError as e:
                 return JSONResponse({"error": f"ключ не принят: {e}"}, status_code=400)
-            # Токен инженер получит сам по ключу — отдаём ссылку на инструкцию.
-            return JSONResponse({"label": label, "host": public_host()})
+            _, token = tokens.issue(label)
+            # Токен в открытую — единожды, показать админу и отдать инженеру.
+            return JSONResponse({"label": label, "host": public_host(), "token": token})
         return JSONResponse({"users": tunnel_keys.list_users()})
 
     async def admin_user_remove(request):
@@ -447,9 +407,8 @@ def build_app(store: TokenStore | None = None):
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path == "/" or path.startswith(("/admin", "/token/")):
-                # / — инструкция; /admin — админ-токен; /token/* — гейт подписью ключа
-                return await call_next(request)
+            if path.startswith("/admin"):
+                return await call_next(request)  # /admin гейтит себя сам (админ-токен)
             rec = authorize(request.headers.get("authorization"), tokens)
             if rec is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -463,9 +422,6 @@ def build_app(store: TokenStore | None = None):
 
     return Starlette(
         routes=[
-            Route("/", connect_page),
-            Route("/token/challenge", token_challenge),
-            Route("/token/redeem", token_redeem, methods=["POST"]),
             Route("/admin", admin_page),
             Route("/admin/api/users", admin_users, methods=["GET", "POST"]),
             Route("/admin/api/users/remove", admin_user_remove, methods=["POST"]),
