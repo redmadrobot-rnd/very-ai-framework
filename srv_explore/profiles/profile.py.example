@@ -1,47 +1,24 @@
 """ОБРАЗЕЦ профиля srv-explore. Скан грузит *.py — этот .py.example НЕ подхватывается.
-Скопируй в <id>.py, поправь ID/COMMANDS/DESC и check.
+Скопируй в <id>.py и поправь.
 
-Профиль описывает одно семейство команд и что в нём — только чтение.
-Не подключён/выключен → все его COMMANDS блокируются. Подключён → решает check.
+Профиль = ТОНКИЙ КОНФИГ подготовки инструмента, НЕ парсер команд. read-only держит
+ресурс-слой (read-only роль СУБД / socket-proxy / firewall / RO-FS), не гард.
+По этому конфигу провизионер ставит клиент, создаёт read-only доступ и проверяет его.
 
-Контракт:
-    ID:       str          — уникальный id, ключ тумблера в админке
-    COMMANDS: list[str]    — бинарники профиля
-    DESC:     str          — одна строка для админки
-    def check(argv, g) -> (ok: bool, reason: str)
-
-g — универсальные примитивы ядра (class Toolkit, guard.py):
-    g.verbs(argv, allow, subreads, value_flags, deny_flags,
-            allow_flags, require_flag, allow_bare, no_follow)  # verb+flag движок
-    g.subcommand(argv, value_flags)   # первый позиционный + хвост
-    g.values(argv, flags, file_flags) # значения флагов; file_flag → ошибка
-    g.forbid_words(text, words)       # \bword\b, вернёт совпавшее
-    g.forbid_substr(text, subs)       # подстрока
-    g.follows(argv)                   # -f / --follow
-    g.url_host(url), g.internal_host(host)
-    g.recurse(argv)                   # вложенную команду через весь гард
-    g.name(argv)
+Поля:
+    ID:        str          — уникальный id, ключ тумблера в админке
+    DESC:      str          — одна строка для админки
+    COMMANDS:  list[str]    — что инструмент даёт (информативно)
+    PACKAGES:  list[str]    — apt-пакеты клиента (ставит провизионер)
+    CREDS_ENV: str          — имя Secret с read-only коннекшеном для агента
+    SETUP:     str | None   — рецепт read-only доступа (:role/:db/:pw подставит провизионер)
+    VERIFY:    str | None   — проба барьера: должна упасть «permission denied»
 """
 
-ID = "myredis"
-COMMANDS = ["myredis-cli"]
-DESC = "myredis-cli (пример: только read-глаголы)"
-
-
-def check(argv, g):
-    return g.verbs(
-        argv,
-        value_flags=["-h", "-p", "-a"],
-        deny_flags=["--eval", "--pipe"],
-        allow=["GET", "MGET", "INFO", "PING"],
-        subreads={"CONFIG": ["GET"]},
-    )
-
-
-# Сложный случай — своя логика на голых примитивах:
-#
-#   def check(argv, g):
-#       sub, rest = g.subcommand(argv)
-#       if sub == "exec":
-#           return g.recurse(rest[1:])
-#       return g.verbs(argv, allow=["ps", "logs", "inspect"], no_follow=True)
+ID = "mydb"
+DESC = "MyDB — read-only роль"
+COMMANDS = ["mydb-cli"]
+PACKAGES = ["mydb-client"]
+CREDS_ENV = "MYDB_INSPECTOR_DSN"
+SETUP = "CREATE USER :role READ ONLY PASSWORD ':pw'"
+VERIFY = "CREATE TABLE _srvx_probe (x int)"

