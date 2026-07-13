@@ -10,9 +10,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 AGENT_USER = os.environ.get("SRV_EXPLORE_AGENT_USER", "srvx-agent")
 MAX_SEC = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", "300")  # анти-подвисание
+# каталог-родитель пакета srv_explore — чтобы `python -m srv_explore.*` в песочнице
+# нашёл пакет независимо от cwd (RO-FS читать не мешает).
+_PKG_PARENT = str(Path(__file__).resolve().parent.parent)
 
 _PROPS = [
     "ProtectSystem=strict",
@@ -37,6 +41,7 @@ def run(args, input_text: str | None = None, extra_env: dict | None = None):
         "--wait",
         f"--uid={AGENT_USER}",
         "--setenv=HOME=/tmp",
+        f"--setenv=PYTHONPATH={_PKG_PARENT}",
     ]
     for p in _PROPS:
         cmd += ["-p", p]

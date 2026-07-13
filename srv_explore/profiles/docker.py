@@ -5,13 +5,13 @@ Read-only держит docker-socket-proxy: клиент бьёт в прокс�
 ID = "docker"
 DESC = "Docker — read-only через socket-proxy"
 COMMANDS = ["docker", "docker-compose"]
-PACKAGES = ["docker-cli"]
+PACKAGES = []  # docker CLI уже на docker-хосте; ставить нечего
 CREDS_ENV = "DOCKER_HOST"  # провизионер укажет на прокси
 
 # Прокси перед /var/run/docker.sock: read-эндпоинты on, мутации (POST) off.
 # Агент ходит в него по DOCKER_HOST, к реальному сокету доступа нет.
 PROXY = {
-    "image": "ghcr.io/tecnativa/docker-socket-proxy:latest",
+    "image": "tecnativa/docker-socket-proxy:latest",
     "port": "127.0.0.1:2375:2375",
     "env": {
         "CONTAINERS": "1",
