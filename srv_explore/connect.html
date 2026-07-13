@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>srv-explore · подключение</title>
+<style>
+  :root { --bg:#0d1117; --surface:#161b22; --surface2:#0f141a; --bd:#30363d;
+    --tx:#e6edf3; --mut:#8b949e; --acc:#2f81f7; --green:#3fb950; }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
+    padding: 3rem 1.25rem 4rem; color: var(--tx);
+    background: radial-gradient(1200px 600px at 80% -10%, #1b2432 0%, var(--bg) 55%) fixed; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 .3rem; } h1 .dot { color: var(--acc); }
+  .sub { color: var(--mut); margin: 0 0 2rem; }
+  .step { display: flex; gap: 1rem; margin: 1.4rem 0; }
+  .n { flex: none; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: #1f6feb22;
+    border: 1px solid #1f6feb66; color: var(--acc); font-weight: 650;
+    display: flex; align-items: center; justify-content: center; }
+  .step h3 { margin: .15rem 0 .4rem; font-size: 1rem; }
+  .step p { margin: .3rem 0; color: var(--mut); }
+  pre { background: var(--surface2); border: 1px solid var(--bd); border-radius: 8px;
+    padding: .8rem 1rem; overflow-x: auto; margin: .5rem 0;
+    font: .86em ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #a5d6ff; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; color: #7ee787; }
+  .note { background: var(--surface); border: 1px solid var(--bd); border-radius: 10px;
+    padding: .9rem 1.1rem; color: var(--mut); font-size: .9rem; margin-top: 2rem; }
+  a { color: var(--acc); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>srv-explore <span class="dot">·</span> readonly-разведка сервера</h1>
+  <p class="sub">Агент на сервере отвечает на вопросы о его состоянии — только чтением.
+  Подключение занимает пару минут, shell-доступ к серверу не нужен.</p>
+
+  <div class="step"><div class="n">1</div><div>
+    <h3>Сгенерируй SSH-ключ</h3>
+    <pre>ssh-keygen -t ed25519 -f ~/.ssh/srvx -N ""</pre>
+  </div></div>
+
+  <div class="step"><div class="n">2</div><div>
+    <h3>Отдай админу публичную часть</h3>
+    <p>Файл <code>~/.ssh/srvx.pub</code> + скажи, как тебя подписать. В ответ получишь
+    токен <code>srvx_…</code> (показывается один раз).</p>
+  </div></div>
+
+  <div class="step"><div class="n">3</div><div>
+    <h3>Подними туннель</h3>
+    <p>Держи открытым, пока работаешь (ключ умеет только этот проброс):</p>
+    <pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@{{HOST}} -i ~/.ssh/srvx</pre>
+  </div></div>
+
+  <div class="step"><div class="n">4</div><div>
+    <h3>Подключи MCP в Claude Code</h3>
+    <pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp \
+  --header "Authorization: Bearer srvx_…"</pre>
+    <p>Дальше — инструмент <code>srv_explore(task)</code>: вопрос на естественном языке,
+    в ответ findings-отчёт.</p>
+  </div></div>
+
+  <div class="note">Агент физически не может писать: read-only ФС на уровне ядра,
+  гард на каждую команду, read-only роли БД. Все сессии видны админу.
+  Админка — <a href="/admin">/admin</a>.</div>
+</div>
+</body>
+</html>

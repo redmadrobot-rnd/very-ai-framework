@@ -130,7 +130,8 @@
     <div class="card">
       <div class="bar">
         <input id="lbl" placeholder="кому / зачем (label)" size="24">
-        <button class="primary" onclick="issue()">Выпустить токен</button>
+        <input id="pubkey" placeholder="SSH public key (ssh-ed25519 AAAA… — опционально)" style="flex:1;min-width:260px">
+        <button class="primary" onclick="issue()">Добавить юзера</button>
       </div>
       <div id="issued"></div>
       <div class="gap tbl-card">
@@ -242,16 +243,22 @@ async function loadTokens() {
 async function issue() {
   const label = $("#lbl").value.trim();
   if (!label) { alert("укажи label"); return; }
-  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label }) });
+  const pubkey = $("#pubkey").value.trim();
+  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label, pubkey }) });
   const d = await r.json();
   if (!r.ok) { alert(d.error || "ошибка"); return; }
-  $("#lbl").value = "";
-  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code></div>`;
+  $("#lbl").value = ""; $("#pubkey").value = "";
+  const guide = d.key_added
+    ? `<div class="muted" style="margin-top:.6rem">ключ добавлен — инженеру для подключения:</div><pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@${esc(d.host)} -i &lt;key&gt;
+claude mcp add --transport http srv-explore http://localhost:8765/mcp \\
+  --header "Authorization: Bearer ${esc(d.token)}"</pre>`
+    : ``;
+  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code>${guide}</div>`;
   loadTokens();
 }
 
 async function revoke(id) {
-  if (!confirm("Отозвать токен " + id + "?")) return;
+  if (!confirm("Отозвать токен " + id + "? SSH-ключ юзера тоже будет снят.")) return;
   await api("/admin/api/tokens/" + encodeURIComponent(id) + "/revoke", { method: "POST" });
   loadTokens();
 }

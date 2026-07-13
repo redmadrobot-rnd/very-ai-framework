@@ -26,7 +26,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, plugin_store
+from srv_explore import backstop, plugin_store, tunnel_keys
 from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
 
@@ -39,6 +39,12 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_GUARD = HERE / "guard.py"
 DEFAULT_PROMPT = HERE / "agent_prompt.md"
 ADMIN_PAGE = HERE / "admin.html"
+CONNECT_PAGE = HERE / "connect.html"
+
+
+def public_host() -> str:
+    return os.environ.get("SRV_EXPLORE_PUBLIC_HOST", "<host>")
+
 
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 
@@ -312,6 +318,13 @@ def build_app(store: TokenStore | None = None):
             html = "<h1>srv-explore admin</h1><p>admin.html не найден</p>"
         return HTMLResponse(html)
 
+    async def connect_page(request):  # noqa: ARG001
+        try:
+            html = CONNECT_PAGE.read_text(encoding="utf-8")
+        except OSError:
+            html = "<h1>srv-explore</h1><p>connect.html не найден</p>"
+        return HTMLResponse(html.replace("{{HOST}}", public_host()))
+
     async def admin_tokens(request):
         denied = _require_admin(request)
         if denied:
@@ -321,16 +334,35 @@ def build_app(store: TokenStore | None = None):
             label = (body.get("label") or "").strip()
             if not label:
                 return JSONResponse({"error": "label обязателен"}, status_code=400)
+            pubkey = (body.get("pubkey") or "").strip()
+            if pubkey:
+                try:
+                    tunnel_keys.add(label, pubkey)
+                except ValueError as e:
+                    return JSONResponse(
+                        {"error": f"ключ не принят: {e}"}, status_code=400
+                    )
             record, token = tokens.issue(label)
             # Токен в открытую — единственный раз, показать админу и не хранить.
-            return JSONResponse({"token": token, "record": _rec_dict(record)})
+            return JSONResponse(
+                {
+                    "token": token,
+                    "record": _rec_dict(record),
+                    "key_added": bool(pubkey),
+                    "host": public_host(),
+                }
+            )
         return JSONResponse({"tokens": [_rec_dict(r) for r in tokens.list()]})
 
     async def admin_revoke(request):
         denied = _require_admin(request)
         if denied:
             return denied
-        ok = tokens.revoke(request.path_params["token_id"])
+        token_id = request.path_params["token_id"]
+        rec = next((r for r in tokens.list() if r.id == token_id), None)
+        ok = tokens.revoke(token_id)
+        if ok and rec:
+            tunnel_keys.remove_label(rec.label)
         return JSONResponse({"revoked": ok}, status_code=200 if ok else 404)
 
     async def admin_runs(request):
@@ -372,8 +404,10 @@ def build_app(store: TokenStore | None = None):
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path.startswith("/admin"):
-                return await call_next(request)  # /admin гейтит себя сам (админ-токен)
+            if path == "/" or path.startswith("/admin"):
+                return await call_next(
+                    request
+                )  # / — инструкция; /admin гейтит себя сам
             rec = authorize(request.headers.get("authorization"), tokens)
             if rec is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -387,6 +421,7 @@ def build_app(store: TokenStore | None = None):
 
     return Starlette(
         routes=[
+            Route("/", connect_page),
             Route("/admin", admin_page),
             Route("/admin/api/tokens", admin_tokens, methods=["GET", "POST"]),
             Route(

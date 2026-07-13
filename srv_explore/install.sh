@@ -91,6 +91,34 @@ fi
 chmod 0640 "$STATE_DIR/tokens.json"
 chown -R "$USER_NAME:$USER_NAME" "$STATE_DIR"
 
+# 5d. туннельный SSH-юзер: транспорт до MCP без HTTPS и без shell-доступа.
+# Ключи живут в StateDir (пишет админка), sshd читает их AuthorizedKeysCommand'ом;
+# ограничения (только проброс 8765, no shell/tty) — в drop-in, ключи чистые.
+TUNNEL_USER=srvx-tunnel
+if ! id "$TUNNEL_USER" >/dev/null 2>&1; then
+  useradd --system --no-create-home --shell /usr/sbin/nologin "$TUNNEL_USER"
+fi
+[ -f "$STATE_DIR/tunnel_keys" ] || install -m 0640 -o "$USER_NAME" -g "$USER_NAME" /dev/null "$STATE_DIR/tunnel_keys"
+cat > /etc/ssh/sshd_config.d/srv-explore-tunnel.conf <<EOF
+Match User $TUNNEL_USER
+  AuthorizedKeysFile none
+  AuthorizedKeysCommand /bin/cat $STATE_DIR/tunnel_keys
+  AuthorizedKeysCommandUser $USER_NAME
+  AllowTcpForwarding yes
+  PermitOpen 127.0.0.1:8765 localhost:8765
+  X11Forwarding no
+  AllowAgentForwarding no
+  PermitTTY no
+  ForceCommand /usr/sbin/nologin
+EOF
+if sshd -t 2>/dev/null; then
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+else
+  echo "!! sshd -t не прошёл — drop-in /etc/ssh/sshd_config.d/srv-explore-tunnel.conf проверь вручную" >&2
+fi
+
+ensure_env_kv SRV_EXPLORE_PUBLIC_HOST "$(hostname -I 2>/dev/null | awk '{print $1}')"
+
 # 6. systemd-юнит
 install -m 0644 "$APP_DIR/srv_explore/systemd/srv-explore.service" /etc/systemd/system/srv-explore.service
 systemctl daemon-reload
@@ -101,3 +129,5 @@ echo "==> готово. Статус: systemctl status srv-explore --no-pager"
 echo "    Управление токенами: открой http://<host>:<port>/admin (админ-токен выше)."
 echo "    Либо CLI от сервис-юзера:"
 echo "    sudo -u $USER_NAME $APP_DIR/venv/bin/python -m srv_explore.token_store --store $STATE_DIR/tokens.json issue --label <кто>"
+echo "    Доступ инженера: ключ в /home/$TUNNEL_USER/.ssh/authorized_keys (см. README),"
+echo "    подключение: ssh -N -L 8765:localhost:8765 $TUNNEL_USER@<host> -i <key>"
