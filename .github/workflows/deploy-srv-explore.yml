@@ -1,8 +1,6 @@
 name: Deploy srv-explore (host service)
 
-# srv-explore ставится НА ХОСТ (systemd), а не как docker-сервис — поэтому отдельный
-# ручной воркфлоу, вне авто-пайплайна контейнеров (deploy-dev.yml его не трогает).
-# Запуск вручную; окружение prod — под required reviewers самого GitHub Environment.
+# srv-explore ставится НА ХОСТ (systemd) для доступа к системам сервера.
 on:
   workflow_dispatch:
     inputs:

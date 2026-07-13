@@ -65,9 +65,9 @@ def probe() -> dict:
 
 
 def status(p: dict) -> str:
-    """Индикатор по главной гарантии — FS read-only ядром. Сеть намеренно открыта
-    (эксплореру нужны внутренние сервисы/БД + API модели), egress не критерий —
-    эксфильтрацию сдерживает гард. green — FS read-only; red — писабельна; unknown."""
+    """Индикатор по главной гарантии — FS read-only ядром (ProtectSystem=strict).
+    egress не критерий: агенту нужен внешний API модели, сеть не закрыта наглухо
+    (egress-firewall — коммит 2). green — FS read-only; red — писабельна."""
     fs = p.get("fs_readonly")
     if fs is None:
         return "unknown"

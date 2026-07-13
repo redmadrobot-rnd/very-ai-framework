@@ -17,11 +17,12 @@ USER_NAME=srv-explore
 
 echo "==> srv-explore install (src=$SRC)"
 
-# 1. ro OS-пользователь (без логина), в группах для чтения docker/journal/логов
+# 1. unprivileged OS-пользователь (без логина), в группах для чтения journal/логов.
+# БЕЗ группы docker — доступ к сокету = escape; docker-чтение через socket-proxy (коммит 2).
 if ! id "$USER_NAME" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin "$USER_NAME"
 fi
-for grp in docker systemd-journal adm; do
+for grp in systemd-journal adm; do
   getent group "$grp" >/dev/null 2>&1 && usermod -aG "$grp" "$USER_NAME" || true
 done
 

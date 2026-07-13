@@ -118,7 +118,6 @@
     <h1>srv-explore <span class="dot">·</span> admin</h1>
     <span id="chips" style="display:none">
       <span id="chip-fs" class="chip"><span class="dotc">●</span>FileSystem: <b>…</b></span>
-      <span id="chip-net" class="chip"><span class="dotc">●</span>Network: <b>…</b></span>
     </span>
   </header>
   <p class="sub">Управление доступом, история сессий и аудит — без SSH к серверу.</p>
@@ -217,15 +216,8 @@ async function loadSecurity() {
   } catch (e) { $("#chips").style.display = "none"; }
 }
 
-function setNetChip(profiles) {
-  const http = profiles.find(p => p.name === "http");
-  if (http && http.enabled) setChip("#chip-net", "green", "safe", "Только GET/HEAD; внутренняя сеть свободно, внешнее — по allowlist.");
-  else setChip("#chip-net", "green", "closed", "Профиль http выключен — сетевые запросы агенту запрещены.");
-}
-
 async function loadProfiles() {
   const d = await (await api("/admin/api/profiles")).json();
-  setNetChip(d.profiles);
   const tb = $("#proftbl tbody"); tb.innerHTML = "";
   for (const p of d.profiles) {
     const tr = document.createElement("tr");

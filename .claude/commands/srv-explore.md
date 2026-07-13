@@ -7,9 +7,8 @@ description: Спросить readonly-эксплорер сервера (remote
 Следуй скиллу `srv-explore`. Порядок:
 
 1. Убедись, что подключён remote MCP `srv-explore` (инструмент `srv_explore`
-   доступен). Нет — попроси инженера подключить его по инструкции из скилла
-   (`claude mcp add --transport http srv-explore <url> --header "Authorization:
-   Bearer <token>"`), токен выдаёт админ. Сам токен/адрес не выдумывай.
+   доступен). Нет — попроси инженера подключить его (туннель + `claude mcp add`,
+   см. `srv_explore/README.md`), токен выдаёт админ. Сам токен/адрес не выдумывай.
 2. Вызови инструмент **`srv_explore`** с этим вопросом. Он вернёт `job_id`.
 3. Поллифай **`srv_explore_status`** по `job_id`, пока `status` не станет `done`
    (или `error`). Не крути слишком часто.

@@ -7,8 +7,9 @@ Wants=network-online.target
 Type=simple
 User=srv-explore
 Group=srv-explore
-# docker (читать docker ps/logs/inspect), systemd-journal (journalctl), adm (/var/log)
-SupplementaryGroups=docker systemd-journal adm
+# systemd-journal (journalctl), adm (/var/log). БЕЗ группы docker — сокет закрыт;
+# docker-чтение через socket-proxy (коммит 2).
+SupplementaryGroups=systemd-journal adm
 EnvironmentFile=/etc/srv-explore/env
 # HOME в writable StateDirectory (у ro-юзера своего /home нет).
 Environment=HOME=%S/srv-explore
