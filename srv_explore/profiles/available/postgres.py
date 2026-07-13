@@ -1,13 +1,6 @@
-"""Профиль psql — одна read-инструкция за запрос. Движок sql (g.sql).
-
-Граница read-only — роль без write/DDL-грантов (НЕ флаг сессии):
-    CREATE ROLE inspector LOGIN PASSWORD :'pw';
-    GRANT CONNECT ON DATABASE app TO inspector;
-    GRANT pg_read_all_data TO inspector;         -- PG14+
-    ALTER ROLE inspector SET statement_timeout = '15s';
-    -- НЕ давать SUPERUSER/CREATE EXTENSION/dblink — пишут side-effect'ом.
-Пароль — Environment Secret PG_INSPECTOR_PASSWORD. Гард: один SELECT/WITH/EXPLAIN/…
-на -c, без EXPLAIN ANALYZE, без write-функций; -f/файл-инструкция запрещены.
+"""Профиль psql — одна read-инструкция на -c. Опциональный.
+Граница read-only — роль с грантом pg_read_all_data (пароль в Secret
+PG_INSPECTOR_PASSWORD). Гард: allow-префикс, forbid write/DDL; -f/файл — deny.
 """
 
 ID = "postgres"
@@ -78,10 +71,16 @@ _FORBID = [
 
 
 def check(argv, g):
-    return g.sql(
-        argv,
-        cmd_flags=["-c", "--command"],
-        file_flags=["-f", "--file"],
-        allow_prefixes=_ALLOW_PREFIXES,
-        forbid=_FORBID,
-    )
+    vals, err = g.values(argv, ["-c", "--command"], file_flags=["-f", "--file"])
+    if err:
+        return False, err
+    if not vals:
+        return False, "psql: нужен -c с одной read-инструкцией"
+    for sql in vals:
+        s = sql.strip().lower()
+        if not any(s.startswith(p) for p in _ALLOW_PREFIXES):
+            return False, f"psql: начни с одного из: {', '.join(_ALLOW_PREFIXES)}"
+        kw = g.forbid_words(sql, _FORBID)
+        if kw:
+            return False, f"psql: запрещённое слово {kw!r} (write/DDL/side-effect)"
+    return True, "psql (read)"

@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
-"""srv-explore — PreToolUse-гард.
+"""srv-explore — PreToolUse-гард. Универсальный движок, БЕЗ доменных знаний.
 
-Читает PreToolUse-JSON со stdin, сверяет Bash-команду с политикой «только чтение»:
-    allow → JSON permissionDecision=allow, exit 0;
-    deny  → причина в stderr + permissionDecision=deny, exit 2 (hard block).
-Fail-closed: любая неоднозначность → deny.
-
-Политика собрана из ПРОФИЛЕЙ — модулей profiles/*.py. Каждый профиль:
-    ID: str, COMMANDS: list[str], DESC: str
-    def check(argv, g) -> (ok, reason)   # g — тулкит хелперов (ниже)
-Профиль владеет своими COMMANDS. Профиль выключен/отсутствует → его команды deny.
-Команда без владельца → падает в fallback-профиль local.py (базовая read-оболочка).
-Метасимволы/пайпы/чтение спецфайлов — общие инварианты ядра, до профилей.
-
-Формат и пример профиля — profiles/FORMAT.md, profiles/profile.py.example.
+Читает PreToolUse-JSON со stdin: allow → exit 0, deny → exit 2. Fail-closed.
+Ядро знает только инварианты (метасимволы/пайпы/спецфайлы), загрузку профилей
+profiles/*.py и диспатч к владельцу; доменная логика — в профилях. Формат —
+profiles/FORMAT.md, шаблон — profiles/profile.py.example.
 """
 
 from __future__ import annotations
@@ -29,65 +20,21 @@ from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
     try:
-        _stream.reconfigure(encoding="utf-8")  # Windows-консоль иначе бьёт кириллицу
+        _stream.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):
         pass
 
 HERE = Path(__file__).resolve().parent
-PROFILES = Path(os.environ.get("SRV_EXPLORE_PROFILES_DIR", str(HERE / "profiles")))
+_DIRS = os.environ.get("SRV_EXPLORE_PROFILES_DIR", str(HERE / "profiles"))
+PROFILE_DIRS = [Path(p) for p in _DIRS.split(os.pathsep) if p]
 STATE = os.environ.get("SRV_EXPLORE_PROFILE_STATE", "/var/lib/srv-explore/profiles.json")
 
-# Метасимволы записи/сайд-эффекта/подстановки/цепочки. Пайп (|) — отдельно (read-пайплайны).
+# Метасимволы записи/подстановки/цепочки; пайп (|) разрешён (read-пайплайны).
 DANGEROUS = ["`", "$(", ">", "<", ";", "&", "\n", "\r"]
-# Спецфайлы: сырые устройства/бесконечные источники вешают/эксфильтрируют.
 SAFE_DEV = {"/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty"}
 
-DOCKER_VALUE_FLAGS = {
-    "-H", "--host", "--context", "--config", "-l", "--log-level",
-    "--tlscacert", "--tlscert", "--tlskey",
-}
-COMPOSE_VALUE_FLAGS = {
-    "-f", "--file", "-p", "--project-name", "--project-directory",
-    "--env-file", "--profile", "--ansi", "--progress",
-}
-EXEC_VALUE_FLAGS = {"-u", "--user", "-e", "--env", "-w", "--workdir", "--env-file"}
-EXEC_DENY_FLAGS = {"--privileged", "-d", "--detach"}
-EXEC_OK_BOOL_FLAGS = {"-i", "-t", "-it", "-ti", "--interactive", "--tty"}
-FOLLOW_FLAGS = {"-f", "--follow"}
 
-# curl — allowlist безопасного GET (deny-unknown, fail-closed).
-CURL_SHORT_BOOL = set("sSiILkfgv46#")
-CURL_SHORT_VALUE = {"m", "A", "e", "H"}
-CURL_LONG_BOOL = {
-    "--silent", "--show-error", "--include", "--head", "--location", "--insecure",
-    "--compressed", "--fail", "--globoff", "--verbose", "--ipv4", "--ipv6",
-    "--progress-bar", "--no-progress-meter",
-}
-CURL_LONG_VALUE = {
-    "--max-time", "--connect-timeout", "--user-agent", "--referer", "--resolve",
-    "--retry", "--header", "--max-redirs", "--limit-rate",
-}
-
-
-# --- примитивы разбора -------------------------------------------------------
-
-def has_follow(argv: list[str]) -> bool:
-    for a in argv:
-        if a in FOLLOW_FLAGS or a.startswith("--follow="):
-            return True
-        if a.startswith("-") and not a.startswith("--") and "f" in a[1:]:
-            return True
-    return False
-
-
-def tail_follows(argv: list[str]) -> bool:
-    for a in argv:
-        if a in ("-f", "-F", "--follow") or a.startswith("--follow="):
-            return True
-        if a.startswith("-") and not a.startswith("--") and "f" in a[1:]:
-            return True
-    return False
-
+# --- универсальные примитивы разбора ------------------------------------------
 
 def forbidden_path(tok: str) -> bool:
     p = tok.split("=", 1)[-1].strip("\"'") if "=" in tok else tok
@@ -96,8 +43,8 @@ def forbidden_path(tok: str) -> bool:
     return p.startswith("/dev/") or p.startswith("/proc/kcore")
 
 
-def subcommand(args: list[str], value_flags: set[str]) -> tuple[str | None, list[str]]:
-    """Первый позиционный токен и хвост, пропуская флаги и их значения."""
+def _subcommand(args: list[str], value_flags: set[str]) -> tuple[str | None, list[str]]:
+    """Первый позиционный токен и хвост."""
     i = 0
     while i < len(args):
         a = args[i]
@@ -114,61 +61,56 @@ def subcommand(args: list[str], value_flags: set[str]) -> tuple[str | None, list
     return None, []
 
 
-# --- SQL / Mongo парсеры (ядро) ----------------------------------------------
-
-def sql_read_guard(sql: str, allow_prefixes, forbid) -> tuple[bool, str]:
-    body = re.sub(r"--[^\n]*", " ", sql)
-    body = re.sub(r"/\*.*?\*/", " ", body, flags=re.S).strip().strip(";").strip()
-    if not body:
-        return False, "пустой SQL"
-    if ";" in body:
-        return False, "несколько стейтментов запрещено (одна инструкция на запрос)"
-    first = body.split(None, 1)[0].lower()
-    allow = [p.lower() for p in allow_prefixes]
-    if first not in allow:
-        return False, f"стейтмент '{first}' не read-only (разрешено: {', '.join(allow)})"
-    if re.search(r"\bexplain\b", body, re.I) and re.search(r"\banalyze\b", body, re.I):
-        return False, "EXPLAIN ANALYZE выполняет запрос — запрещено"
-    for kw in forbid:
-        if re.search(rf"\b{re.escape(kw)}\b", body, re.I):
-            return False, f"запрещённое ключевое слово/функция: {kw}"
-    return True, "sql read-only"
+def _follows(argv: list[str]) -> bool:
+    """-f / -F / --follow / слитные короткие — стриминг."""
+    for a in argv:
+        if a in ("-f", "-F", "--follow") or a.startswith("--follow="):
+            return True
+        if a.startswith("-") and not a.startswith("--") and "f" in a[1:]:
+            return True
+    return False
 
 
-def _extract_args(argv, take_flags, file_flags, label) -> tuple[list[str] | None, str]:
-    """Собрать значения take_flags (-c/--eval); file_flags и интерактив — deny."""
+def _values(argv, take_flags: set[str], file_flags: set[str]) -> tuple[list[str] | None, str]:
+    """Значения take-флагов (`-c x`, `--x=y`, слитно `-cSELECT`); file_flag → ошибка."""
     vals, i = [], 1
     while i < len(argv):
         a = argv[i]
         if a in file_flags or any(
-            a.startswith(f + "=") or (a.startswith(f) and len(a) > len(f) and not f.startswith("--"))
+            a.startswith(f + "=") or (not f.startswith("--") and a.startswith(f) and len(a) > len(f))
             for f in file_flags
         ):
-            return None, f"{label}: скрипт/файл-инструкция не проверяется гардом — запрещено"
+            return None, "скрипт/файл-инструкция не проверяется гардом — запрещено"
         if a in take_flags:
             if i + 1 >= len(argv):
-                return None, f"{label}: {a} без аргумента"
+                return None, f"{a} без аргумента"
             vals.append(argv[i + 1])
             i += 2
             continue
         matched = False
         for f in take_flags:
             if a.startswith(f + "="):
-                vals.append(a.split("=", 1)[1])
-                matched = True
-                break
+                vals.append(a.split("=", 1)[1]); matched = True; break
             if not f.startswith("--") and a.startswith(f) and len(a) > 2:
-                vals.append(a[len(f):])
-                matched = True
-                break
-        if matched:
-            i += 1
-            continue
-        i += 1
+                vals.append(a[len(f):]); matched = True; break
+        i += 1 if not matched else 1
     return vals, ""
 
 
-# --- curl / docker (ядро) ----------------------------------------------------
+def _forbid_words(text: str, words) -> str | None:
+    for kw in words:
+        if re.search(rf"\b{re.escape(kw)}\b", text, re.I):
+            return kw
+    return None
+
+
+def _forbid_substr(text: str, subs) -> str | None:
+    low = text.lower()
+    for kw in subs:
+        if kw.lower() in low:
+            return kw
+    return None
+
 
 def _url_host(url: str) -> str:
     u = url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
@@ -179,7 +121,7 @@ def _url_host(url: str) -> str:
     return u.split(":", 1)[0].lower()
 
 
-def _host_internal(host: str) -> bool:
+def _internal_host(host: str) -> bool:
     if not host:
         return False
     try:
@@ -189,128 +131,7 @@ def _host_internal(host: str) -> bool:
         return "." not in host
 
 
-def _curl(argv, internal_only, external_allow) -> tuple[bool, str]:
-    urls, i = [], 1
-    while i < len(argv):
-        a = argv[i]
-        if a.startswith("@"):
-            return False, "curl: аргумент с '@' читает локальный файл — запрещено"
-        if a in ("-X", "--request"):
-            val = argv[i + 1] if i + 1 < len(argv) else ""
-            if val.upper() not in ("GET", "HEAD"):
-                return False, f"curl -X {val}: разрешён только GET/HEAD"
-            i += 2
-            continue
-        if a.startswith("--request="):
-            if a.split("=", 1)[1].upper() not in ("GET", "HEAD"):
-                return False, "curl --request: разрешён только GET/HEAD"
-            i += 1
-            continue
-        if a in CURL_LONG_VALUE or (a.startswith("--") and "=" in a and a.split("=", 1)[0] in CURL_LONG_VALUE):
-            val = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else "")
-            if val.startswith("@"):
-                return False, f"curl {a}: значение с '@' читает локальный файл — запрещено"
-            i += 1 if "=" in a else 2
-            continue
-        if a in CURL_LONG_BOOL:
-            i += 1
-            continue
-        if a.startswith("--"):
-            return False, f"curl: флаг {a} не в allowlist безопасного GET (fail-closed)"
-        if a.startswith("-") and len(a) >= 2:
-            chars = a[1:]
-            if all(c in CURL_SHORT_BOOL for c in chars):
-                i += 1
-                continue
-            if len(chars) == 1 and chars in CURL_SHORT_VALUE:
-                val = argv[i + 1] if i + 1 < len(argv) else ""
-                if val.startswith("@"):
-                    return False, f"curl -{chars}: значение с '@' читает локальный файл — запрещено"
-                i += 2
-                continue
-            return False, f"curl: флаг {a} не в allowlist безопасного GET (fail-closed)"
-        urls.append(a)
-        i += 1
-    if not urls:
-        return False, "curl без URL"
-    if internal_only:
-        allow = [h.lower() for h in external_allow]
-        for u in urls:
-            host = _url_host(u)
-            if not _host_internal(host) and host not in allow:
-                return False, (
-                    f"curl {host}: внешний хост запрещён (внутренняя сеть свободно, "
-                    f"внешнее — только из external_allow профиля)"
-                )
-    return True, "curl GET"
-
-
-def _docker_exec(rest, g) -> tuple[bool, str]:
-    i = 0
-    while i < len(rest):
-        a = rest[i]
-        flagname = a.split("=", 1)[0] if a.startswith("--") and "=" in a else a
-        if flagname in EXEC_DENY_FLAGS:
-            return False, f"docker exec {flagname} запрещён (эскалация/фоновый запуск)"
-        if a in EXEC_VALUE_FLAGS:
-            i += 2
-            continue
-        if a.startswith("--") and "=" in a:
-            i += 1
-            continue
-        if a in EXEC_OK_BOOL_FLAGS:
-            i += 1
-            continue
-        if a.startswith("-"):
-            return False, f"docker exec: неизвестный флаг {a} (fail-closed)"
-        positional = rest[i:]
-        if len(positional) < 2:
-            return False, "docker exec без контейнера и внутренней команды"
-        inner = positional[1:]
-        ok, reason = g.recurse(inner)
-        if not ok:
-            return False, f"docker exec: внутренняя команда не read-only — {reason}"
-        return True, f"docker exec → {os.path.basename(inner[0])} (read)"
-    return False, "docker exec без контейнера и внутренней команды"
-
-
-def _docker(argv, reads, noun_reads, compose_reads, g) -> tuple[bool, str]:
-    def compose(args):
-        sub, rest = subcommand(args, COMPOSE_VALUE_FLAGS)
-        if sub is None:
-            return False, "docker compose без подкоманды"
-        if sub not in compose_reads:
-            return False, f"docker compose {sub}: не read-only"
-        if sub == "logs" and has_follow(rest):
-            return False, "docker compose logs -f стримит; используй --tail N"
-        return True, f"docker compose {sub}"
-
-    if os.path.basename(argv[0]) == "docker-compose":
-        return compose(argv[1:])
-    sub, rest = subcommand(argv[1:], DOCKER_VALUE_FLAGS)
-    if sub is None:
-        if any(a in ("--version", "-v") for a in argv[1:]):
-            return True, "docker --version"
-        return False, "docker без подкоманды"
-    if sub == "compose":
-        return compose(rest)
-    if sub == "exec":
-        return _docker_exec(rest, g)
-    if sub in reads:
-        if sub == "logs" and has_follow(rest):
-            return False, "docker logs -f стримит; используй --tail N"
-        if sub == "stats" and "--no-stream" not in rest:
-            return False, "docker stats без --no-stream стримит; добавь --no-stream"
-        return True, f"docker {sub}"
-    if sub in noun_reads:
-        verb, _ = subcommand(rest, set())
-        if verb in noun_reads[sub]:
-            return True, f"docker {sub} {verb}"
-        return False, f"docker {sub} {verb}: не read-only (разрешены: {', '.join(noun_reads[sub])})"
-    return False, f"docker {sub}: не read-only (разрешены: {', '.join(reads)}; exec с read-командой; compose)"
-
-
-# --- generic verb+flag движок ------------------------------------------------
+# --- generic verb+flag движок (данные-driven) --------------------------------
 
 def _verbs(argv, *, allow=(), subreads=None, value_flags=(), deny_flags=(),
           allow_flags=None, require_flag=None, allow_bare=False,
@@ -361,7 +182,6 @@ def _verbs(argv, *, allow=(), subreads=None, value_flags=(), deny_flags=(),
             return True, f"{name} {verb} (read)"
         return False, f"{name} {positionals[0]}: не read-only команда"
 
-    # флаговый режим (nginx/crontab): позиционных быть не должно
     if positionals:
         return False, f"{name}: неожиданный аргумент {positionals[0]!r} (только чтение)"
     if allow_flags is not None:
@@ -372,64 +192,10 @@ def _verbs(argv, *, allow=(), subreads=None, value_flags=(), deny_flags=(),
     return True, f"{name} (read)"
 
 
-# --- локальные read-утилиты (для профиля local) ------------------------------
-
-def _read_util(argv, read_commands) -> tuple[bool, str]:
-    name = os.path.basename(argv[0])
-    if name == "tail" and tail_follows(argv[1:]):
-        return False, "tail -f/-F/--follow повесит агента; используй -n/--lines"
-    if name == "journalctl":
-        if has_follow(argv[1:]):
-            return False, "journalctl -f/--follow повесит агента; используй --since/-n"
-        vac = {"--vacuum-time", "--vacuum-size", "--vacuum-files", "--rotate",
-               "--flush", "--sync", "--relinquish-var", "--update-catalog", "--setup-keys"}
-        if any(a.split("=", 1)[0] in vac for a in argv[1:]):
-            return False, "journalctl --vacuum/--rotate/--flush меняет журнал — запрещено"
-    if name == "ss" and any(a in ("-K", "--kill") for a in argv[1:]):
-        return False, "ss -K/--kill закрывает сокеты — запрещено"
-    if name == "netstat" and any(a in ("-c", "--continuous") for a in argv[1:]):
-        return False, "netstat -c/--continuous стримит бесконечно; убери флаг"
-    if name == "date" and any(a in ("-s", "--set") or a.startswith("--set=") for a in argv[1:]):
-        return False, "date -s/--set меняет системные часы — запрещено"
-    if name == "sort" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in argv[1:]):
-        return False, "sort -o/--output пишет в файл — запрещено"
-    if name == "tree" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in argv[1:]):
-        return False, "tree -o пишет вывод в файл — запрещено"
-    if name == "uniq":
-        vf = {"-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"}
-        pos, i = [], 1
-        while i < len(argv):
-            a = argv[i]
-            if a in vf:
-                i += 2
-                continue
-            if a.startswith("-"):
-                i += 1
-                continue
-            pos.append(a)
-            i += 1
-        if len(pos) >= 2:
-            return False, "uniq c двумя файлами пишет во второй — запрещено"
-    if name == "find":
-        bad = ("-delete", "-exec", "-execdir", "-ok", "-okdir",
-               "-fprint", "-fprint0", "-fprintf", "-fls")
-        if any(a in bad for a in argv):
-            return False, "find с -delete/-exec*/-ok*/-fprint* запрещён"
-        return True, "find (read)"
-    if name == "yq":
-        bad = {"-i", "--inplace", "--in-place", "-s", "--split-exp"}
-        if any(a in bad or a.split("=", 1)[0] in bad for a in argv[1:]):
-            return False, "yq -i/--split-exp пишет файлы — запрещено"
-        return True, "yq (read)"
-    if name in read_commands:
-        return True, f"{name} (read)"
-    return False, f"команда '{name}' не в allowlist read-команд"
-
-
-# --- тулкит g для профилей ---------------------------------------------------
+# --- тулкит g: универсальные примитивы для profile.check(argv, g) ------------
 
 class Toolkit:
-    """API хелперов, передаётся в profile.check(argv, g). Инкапсулирует разбор ядра."""
+    """Хелперы ядра для профилей. Доменных знаний не несёт."""
 
     def __init__(self, depth: int):
         self.depth = depth
@@ -438,43 +204,28 @@ class Toolkit:
         return os.path.basename(argv[0])
 
     def subcommand(self, argv, value_flags=()):
-        return subcommand(argv[1:], set(value_flags))
+        return _subcommand(argv[1:], set(value_flags))
 
     def verbs(self, argv, **kw):
         return _verbs(argv, **kw)
 
-    def sql(self, argv, *, cmd_flags, file_flags=(), allow_prefixes, forbid):
-        vals, err = _extract_args(argv, set(cmd_flags), set(file_flags), self.name(argv))
-        if err:
-            return False, err
-        if not vals:
-            return False, f'{self.name(argv)}: интерактив запрещён — используй {cmd_flags[0]} "SELECT …"'
-        if len(vals) > 1:
-            return False, "несколько инструкций запрещено (одна на запрос)"
-        return sql_read_guard(vals[0], allow_prefixes, forbid)
+    def values(self, argv, flags, file_flags=()):
+        return _values(argv, set(flags), set(file_flags))
 
-    def mongo(self, argv, *, eval_flags, file_flags=(), forbid):
-        vals, err = _extract_args(argv, set(eval_flags), set(file_flags), self.name(argv))
-        if err:
-            return False, err
-        if not vals:
-            return False, 'mongosh: интерактив/скрипт запрещён — используй --eval "db.coll.find(...)"'
-        if len(vals) > 1:
-            return False, "несколько --eval запрещено (одна инструкция на запрос)"
-        low = vals[0].lower()
-        for kw in forbid:
-            if kw.lower() in low:
-                return False, f"mongo: запрещённый метод/оператор: {kw}"
-        return True, "mongo read-only (--eval)"
+    def forbid_words(self, text, words):
+        return _forbid_words(text, words)
 
-    def curl(self, argv, *, internal_only=True, external_allow=()):
-        return _curl(argv, internal_only, list(external_allow))
+    def forbid_substr(self, text, subs):
+        return _forbid_substr(text, subs)
 
-    def docker(self, argv, *, reads, noun_reads=None, compose_reads=()):
-        return _docker(argv, reads, noun_reads or {}, compose_reads, self)
+    def follows(self, argv):
+        return _follows(argv)
 
-    def read_util(self, argv, read_commands):
-        return _read_util(argv, set(read_commands))
+    def url_host(self, url):
+        return _url_host(url)
+
+    def internal_host(self, host):
+        return _internal_host(host)
 
     def recurse(self, argv):
         return dispatch(argv, self.depth + 1)
@@ -486,27 +237,27 @@ _registry: dict | None = None
 
 
 def _load_profiles() -> dict:
-    """Импорт profiles/*.py → {cmd_of: команда→id, mod_of: id→модуль, fallback}."""
     cmd_of, mod_of, fallback = {}, {}, None
-    for f in sorted(PROFILES.glob("*.py")):
-        if f.name.startswith("_"):
-            continue
-        spec = importlib.util.spec_from_file_location(f"srvx_profile_{f.stem}", f)
-        if not spec or not spec.loader:
-            continue
-        mod = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(mod)
-        except Exception:  # noqa: BLE001 — битый профиль не должен ронять гард
-            continue
-        pid = getattr(mod, "ID", None)
-        if not pid or not callable(getattr(mod, "check", None)):
-            continue
-        mod_of[pid] = mod
-        if getattr(mod, "FALLBACK", False):
-            fallback = mod
-        for cmd in getattr(mod, "COMMANDS", []):
-            cmd_of[cmd] = pid
+    for d in PROFILE_DIRS:
+        for f in sorted(d.glob("*.py")):
+            if f.name.startswith("_"):
+                continue
+            spec = importlib.util.spec_from_file_location(f"srvx_profile_{f.stem}", f)
+            if not spec or not spec.loader:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+            except Exception:  # noqa: BLE001
+                continue
+            pid = getattr(mod, "ID", None)
+            if not pid or not callable(getattr(mod, "check", None)):
+                continue
+            mod_of[pid] = mod
+            if getattr(mod, "FALLBACK", False):
+                fallback = mod
+            for cmd in getattr(mod, "COMMANDS", []):
+                cmd_of[cmd] = pid
     return {"cmd_of": cmd_of, "mod_of": mod_of, "fallback": fallback}
 
 
@@ -518,13 +269,12 @@ def registry() -> dict:
 
 
 def profile_enabled(pid: str) -> bool:
-    # Читаем свежим на каждый вызов: тумблер из админки действует без рестарта.
-    # Файл крохотный; реестр модулей при этом кешируется (импорт один раз).
+    # Свежее чтение: тумблер админки без рестарта.
     try:
         toggles = json.loads(Path(STATE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         toggles = {}
-    return bool(toggles.get(pid, True))  # по умолчанию включён
+    return bool(toggles.get(pid, True))
 
 
 # --- диспетчер ---------------------------------------------------------------

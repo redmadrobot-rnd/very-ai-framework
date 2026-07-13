@@ -1,9 +1,10 @@
-"""Профиль local — базовая read-оболочка. FALLBACK: ловит команды без своего профиля.
+"""Профиль shell — базовая read-оболочка. FALLBACK, единственный профиль ядра.
 
-Свобода базы: широкий READ_COMMANDS (обычные read-утилиты). Покомандные write-флаг-
-стражи (sort -o, find -exec, date -s, tail -f, ss -K…) — в движке local (g.read_util).
-Серверные бинари (nginx/ufw/crontab/systemctl) — декларативно, через g.verbs.
-Команда не отсюда и не из другого профиля → deny (default-deny).
+Гарантия против записи — read-only FS (systemd ProtectSystem=strict); гард её НЕ
+дублирует. Режет лишь то, что RO-FS не ловит: подвисание (стрим), не-FS сайд-эффекты
+(смена времени/сети) и побег из allowlist (find -exec запускает любой бинарь).
+Серверные бинари (nginx/ufw/crontab/systemctl) — декларативно через g.verbs.
+Не покрыто включённым профилем → deny.
 """
 
 ID = "shell"
@@ -66,7 +67,13 @@ READ_COMMANDS = [
     "dpkg-query",
 ]
 
-# Серверные бинари: kwargs для g.verbs (read-глаголы / whitelist флагов).
+# Флаги, которые RO-FS НЕ ловит: смена часов/сети, бесконечный стрим.
+_DENY_FLAGS = {
+    "date": {"-s", "--set"},  # системные часы
+    "ss": {"-K", "--kill"},  # рвёт коннекты
+    "netstat": {"-c", "--continuous"},  # бесконечный стрим
+}
+
 COMMAND_RULES = {
     "nginx": {"allow_flags": ["-v", "-V", "-t", "-T"]},
     "ufw": {"allow": ["status", "show", "version"]},
@@ -108,6 +115,28 @@ _SYSTEMCTL_VALUE_FLAGS = [
 ]
 
 
+def _read_util(argv, g):
+    name = g.name(argv)
+    if name not in READ_COMMANDS:
+        return False, f"'{name}' не покрыта включённым профилем — deny (default-deny)"
+    deny = _DENY_FLAGS.get(name, set())
+    for a in argv[1:]:
+        if a.split("=", 1)[0] in deny:
+            return False, f"{name} {a.split('=', 1)[0]}: не read — запрещено"
+    if name == "tail" and g.follows(argv):
+        return False, "tail -f стримит бесконечно — запрещено"
+    if name == "journalctl":
+        for a in argv[1:]:
+            # -f/--follow (в т.ч. слитно -fu) стримит; -F/--field — read, ок
+            if (
+                a in ("-f", "--follow")
+                or a.startswith("--follow=")
+                or (a.startswith("-") and not a.startswith("--") and "f" in a[1:])
+            ):
+                return False, "journalctl -f стримит бесконечно — запрещено"
+    return True, f"{name} (read)"
+
+
 def check(argv, g):
     name = g.name(argv)
     if name == "systemctl":
@@ -120,4 +149,4 @@ def check(argv, g):
     rule = COMMAND_RULES.get(name)
     if rule:
         return g.verbs(argv, **rule)
-    return g.read_util(argv, READ_COMMANDS)
+    return _read_util(argv, g)

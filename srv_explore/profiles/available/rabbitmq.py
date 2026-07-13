@@ -1,9 +1,5 @@
-"""Профиль rabbitmqctl — только read-подкоманды. Движок generic (g.verbs).
-
-Граница read-only — юзер с тегом monitoring и read-only permissions:
-    rabbitmqctl set_user_tags inspector monitoring
-    rabbitmqctl set_permissions -p / inspector '^$' '^$' '.*'
-Гард пускает list_*/status/метрики.
+"""Профиль rabbitmqctl — только read-подкоманды (list_*/status/метрики).
+Граница read-only — юзер с тегом monitoring и read-only permissions.
 """
 
 ID = "rabbitmq"

