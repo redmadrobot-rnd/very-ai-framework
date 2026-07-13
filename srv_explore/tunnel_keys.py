@@ -73,3 +73,16 @@ def remove_label(label: str) -> int:
     kept = [ln for ln in lines if ln.split(maxsplit=2)[2:] != [label]]
     _save(kept)
     return len(lines) - len(kept)
+
+
+def list_users() -> list[dict]:
+    """[{label, type, fp}] — fp = хвост base64 ключа, чтобы отличать глазами."""
+    users = []
+    for ln in _lines():
+        parts = ln.split(maxsplit=2)
+        if len(parts) < 2:
+            continue
+        ktype, blob = parts[0], parts[1]
+        label = parts[2] if len(parts) == 3 else ""
+        users.append({"label": label, "type": ktype, "fp": "…" + blob[-12:]})
+    return users

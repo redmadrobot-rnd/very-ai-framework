@@ -16,6 +16,7 @@ Agent SDK headless с readonly-агентом, а каждую Bash-команд
 
 from __future__ import annotations
 
+import base64
 import contextvars
 import json
 import os
@@ -26,7 +27,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, plugin_store, tunnel_keys
+from srv_explore import backstop, key_auth, plugin_store, tunnel_keys
 from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
 
@@ -305,6 +306,38 @@ def build_app(store: TokenStore | None = None):
             return json.dumps({"error": "unknown job_id"}, ensure_ascii=False)
         return json.dumps(job, ensure_ascii=False)
 
+    # --- self-serve токен по ключу (гейт — подпись, не админ-токен) ---
+    async def token_challenge(request):  # noqa: ARG001
+        return JSONResponse({"nonce": key_auth.new_challenge()})
+
+    async def token_redeem(request):
+        body = await request.json()
+        pubkey = (body.get("pubkey") or "").strip()
+        nonce = (body.get("nonce") or "").strip()
+        signature = body.get("signature") or ""
+        if not signature and body.get("signature_b64"):
+            try:
+                signature = base64.b64decode(body["signature_b64"]).decode()
+            except (ValueError, UnicodeDecodeError):
+                return JSONResponse({"error": "signature_b64 битый"}, status_code=400)
+        if not (pubkey and nonce and signature):
+            return JSONResponse(
+                {"error": "нужны pubkey, nonce, signature"}, status_code=400
+            )
+        if not key_auth.consume_challenge(nonce):
+            return JSONResponse(
+                {"error": "nonce неизвестен или протух — возьми новый"},
+                status_code=400,
+            )
+        label = key_auth.verify(pubkey, nonce, signature)
+        if label is None:
+            return JSONResponse(
+                {"error": "подпись не подтверждена (ключ не зарегистрирован?)"},
+                status_code=401,
+            )
+        _, token = tokens.issue(label)
+        return JSONResponse({"token": token, "label": label})
+
     # --- /admin: HTML-оболочка публична, данные — за админ-токеном ---
     def _require_admin(request):
         if not admin_authorized(request.headers.get("authorization")):
@@ -325,45 +358,35 @@ def build_app(store: TokenStore | None = None):
             html = "<h1>srv-explore</h1><p>connect.html не найден</p>"
         return HTMLResponse(html.replace("{{HOST}}", public_host()))
 
-    async def admin_tokens(request):
+    async def admin_users(request):
         denied = _require_admin(request)
         if denied:
             return denied
         if request.method == "POST":
             body = await request.json()
             label = (body.get("label") or "").strip()
-            if not label:
-                return JSONResponse({"error": "label обязателен"}, status_code=400)
             pubkey = (body.get("pubkey") or "").strip()
-            if pubkey:
-                try:
-                    tunnel_keys.add(label, pubkey)
-                except ValueError as e:
-                    return JSONResponse(
-                        {"error": f"ключ не принят: {e}"}, status_code=400
-                    )
-            record, token = tokens.issue(label)
-            # Токен в открытую — единственный раз, показать админу и не хранить.
-            return JSONResponse(
-                {
-                    "token": token,
-                    "record": _rec_dict(record),
-                    "key_added": bool(pubkey),
-                    "host": public_host(),
-                }
-            )
-        return JSONResponse({"tokens": [_rec_dict(r) for r in tokens.list()]})
+            if not label or not pubkey:
+                return JSONResponse(
+                    {"error": "нужны label и публичный ключ"}, status_code=400
+                )
+            try:
+                tunnel_keys.add(label, pubkey)
+            except ValueError as e:
+                return JSONResponse({"error": f"ключ не принят: {e}"}, status_code=400)
+            # Токен инженер получит сам по ключу — отдаём ссылку на инструкцию.
+            return JSONResponse({"label": label, "host": public_host()})
+        return JSONResponse({"users": tunnel_keys.list_users()})
 
-    async def admin_revoke(request):
+    async def admin_user_remove(request):
         denied = _require_admin(request)
         if denied:
             return denied
-        token_id = request.path_params["token_id"]
-        rec = next((r for r in tokens.list() if r.id == token_id), None)
-        ok = tokens.revoke(token_id)
-        if ok and rec:
-            tunnel_keys.remove_label(rec.label)
-        return JSONResponse({"revoked": ok}, status_code=200 if ok else 404)
+        body = await request.json()
+        label = (body.get("label") or "").strip()
+        removed_key = tunnel_keys.remove_label(label)
+        removed_tok = tokens.revoke_label(label)
+        return JSONResponse({"key_removed": removed_key, "tokens_revoked": removed_tok})
 
     async def admin_runs(request):
         denied = _require_admin(request)
@@ -377,6 +400,26 @@ def build_app(store: TokenStore | None = None):
         if denied:
             return denied
         return JSONResponse({"security": security, "status": backstop.status(security)})
+
+    async def admin_ask(request):
+        denied = _require_admin(request)
+        if denied:
+            return denied
+        body = await request.json()
+        task = (body.get("task") or "").strip()
+        if not task:
+            return JSONResponse({"error": "task обязателен"}, status_code=400)
+        job_id = jobs.start(task, label="admin", coro_factory=lambda: run_agent(task))
+        return JSONResponse({"job_id": job_id})
+
+    async def admin_ask_status(request):
+        denied = _require_admin(request)
+        if denied:
+            return denied
+        job = jobs.get(request.path_params["job_id"])
+        if job is None:
+            return JSONResponse({"error": "unknown job_id"}, status_code=404)
+        return JSONResponse(job)
 
     async def admin_plugins(request):
         denied = _require_admin(request)
@@ -396,7 +439,7 @@ def build_app(store: TokenStore | None = None):
             {
                 "plugins": [
                     {"name": n, "desc": d, "enabled": state[n]}
-                    for n, d in plugin_store.PLUGINS.items()
+                    for n, d in plugin_store.registry().items()
                 ]
             }
         )
@@ -404,10 +447,9 @@ def build_app(store: TokenStore | None = None):
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path == "/" or path.startswith("/admin"):
-                return await call_next(
-                    request
-                )  # / — инструкция; /admin гейтит себя сам
+            if path == "/" or path.startswith(("/admin", "/token/")):
+                # / — инструкция; /admin — админ-токен; /token/* — гейт подписью ключа
+                return await call_next(request)
             rec = authorize(request.headers.get("authorization"), tokens)
             if rec is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -422,23 +464,21 @@ def build_app(store: TokenStore | None = None):
     return Starlette(
         routes=[
             Route("/", connect_page),
+            Route("/token/challenge", token_challenge),
+            Route("/token/redeem", token_redeem, methods=["POST"]),
             Route("/admin", admin_page),
-            Route("/admin/api/tokens", admin_tokens, methods=["GET", "POST"]),
-            Route(
-                "/admin/api/tokens/{token_id}/revoke", admin_revoke, methods=["POST"]
-            ),
+            Route("/admin/api/users", admin_users, methods=["GET", "POST"]),
+            Route("/admin/api/users/remove", admin_user_remove, methods=["POST"]),
             Route("/admin/api/runs", admin_runs),
             Route("/admin/api/security", admin_security),
             Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
+            Route("/admin/api/ask", admin_ask, methods=["POST"]),
+            Route("/admin/api/ask/{job_id}", admin_ask_status),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(SplitAuth)],
         lifespan=lifespan,
     )
-
-
-def _rec_dict(r) -> dict:
-    return {"id": r.id, "label": r.label, "created": r.created}
 
 
 def main() -> int:

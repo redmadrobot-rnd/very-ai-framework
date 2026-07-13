@@ -1,4 +1,8 @@
-"""Тумблеры плагинов гарда: plugins.json в StateDir, гард читает на каждый вызов."""
+"""Тумблеры плагинов гарда: plugins.json в StateDir, гард читает на каждый вызов.
+
+Реестр плагинов (имя + описание) НЕ зашит — берётся из profiles/*.json (файлы с полем
+`plugin`), тот же источник, что и у гарда. Новый плагин = новый профиль, код не трогаем.
+"""
 
 from __future__ import annotations
 
@@ -7,22 +11,25 @@ import os
 from pathlib import Path
 
 DEFAULT_STORE = "/var/lib/srv-explore/plugins.json"
-
-PLUGINS = {
-    "docker": "docker / docker-compose (read-подкоманды, exec с read-командой)",
-    "postgres": "psql (одна read-инструкция за запрос)",
-    "mysql": "mysql (одна read-инструкция за запрос)",
-    "clickhouse": "clickhouse-client (одна read-инструкция за запрос)",
-    "mongo": "mongosh --eval (read-методы, без $out/$merge/runCommand)",
-    "redis": "redis-cli (read-глаголы, CONFIG только GET)",
-    "rabbitmq": "rabbitmqctl (list_*/status/cluster_status)",
-    "http": "curl (только GET/HEAD, внутренняя сеть; внешнее по allowlist)",
-    "ssh": "ssh (удалённая команда рекурсивно через гард)",
-}
+PROFILES = Path(__file__).resolve().parent / "profiles"
 
 
 def store_path() -> Path:
     return Path(os.environ.get("SRV_EXPLORE_PLUGINS", DEFAULT_STORE))
+
+
+def registry() -> dict[str, str]:
+    """{plugin: desc} из профилей — единый декларативный список."""
+    out: dict[str, str] = {}
+    profiles_dir = Path(os.environ.get("SRV_EXPLORE_PROFILES", str(PROFILES)))
+    for f in sorted(profiles_dir.glob("*.json")):
+        try:
+            prof = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if prof.get("plugin"):
+            out[prof["plugin"]] = prof.get("desc", "")
+    return out
 
 
 def load() -> dict[str, bool]:
@@ -30,11 +37,11 @@ def load() -> dict[str, bool]:
         data = json.loads(store_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
-    return {name: bool(data.get(name, True)) for name in PLUGINS}
+    return {name: bool(data.get(name, True)) for name in registry()}
 
 
 def set_enabled(name: str, enabled: bool) -> dict[str, bool]:
-    if name not in PLUGINS:
+    if name not in registry():
         raise KeyError(name)
     state = load()
     state[name] = enabled

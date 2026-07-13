@@ -42,19 +42,29 @@ PROFILES = HERE / "profiles"
 # отдельно — read-пайплайны легитимны, каждый сегмент проверяется по-своему.
 DANGEROUS = ["`", "$(", ">", "<", ";", "&", "\n", "\r"]
 
-DB_CLIENTS = ("psql", "mysql", "mongosh", "clickhouse-client", "redis-cli")
-
-# Плагины: семейства команд, чей эффект уходит за пределы OS-песочницы.
-# Выключен/отсутствует → deny. Состояние — plugins.json (тумблеры в админке).
-PLUGIN_OF = {
-    "docker": "docker", "docker-compose": "docker",
-    "psql": "postgres", "mysql": "mysql", "clickhouse-client": "clickhouse",
-    "mongosh": "mongo", "redis-cli": "redis", "rabbitmqctl": "rabbitmq",
-    "curl": "http", "ssh": "ssh",
-}
-KNOWN_PLUGINS = tuple(dict.fromkeys(PLUGIN_OF.values()))
+# Плагины (кросс-граничные семейства команд) описаны декларативно в profiles/*.json:
+# {plugin, commands, desc, handler, ...правила}. Реестр строится сканом — новый плагин
+# = новый профиль, код не трогаем. Локальная база (shell.json) плагином НЕ считается.
 DEFAULT_PLUGINS_PATH = "/var/lib/srv-explore/plugins.json"
+_registry_cache: dict | None = None
 _plugins_cache: dict | None = None
+
+
+def registry() -> dict:
+    """{'cmd_of': команда→плагин, 'prof_of': плагин→профиль} из profiles/*.json."""
+    global _registry_cache
+    if _registry_cache is None:
+        cmd_of, prof_of = {}, {}
+        for f in sorted(PROFILES.glob("*.json")):
+            prof = load_json(f.name)
+            name = prof.get("plugin")
+            if not name:
+                continue
+            prof_of[name] = prof
+            for cmd in prof.get("commands", []):
+                cmd_of[cmd] = name
+        _registry_cache = {"cmd_of": cmd_of, "prof_of": prof_of}
+    return _registry_cache
 
 
 def plugin_enabled(plugin: str) -> bool:
@@ -65,7 +75,8 @@ def plugin_enabled(plugin: str) -> bool:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = {}
-        _plugins_cache = {p: bool(data.get(p, True)) for p in KNOWN_PLUGINS}
+        known = registry()["prof_of"].keys()
+        _plugins_cache = {p: bool(data.get(p, True)) for p in known}
     return _plugins_cache.get(plugin, False)
 
 # Спецфайлы, чтение которых блокируем: сырые устройства и бесконечные источники
@@ -184,31 +195,26 @@ def sql_read_guard(sql: str, profile: dict) -> tuple[bool, str]:
     return True, "sql read-only"
 
 
-def find_client_profile(client: str, kind: str | None = None) -> dict | None:
-    """Профиль по имени клиента; если задан kind — ещё и по типу диалекта."""
-    for f in PROFILES.glob("*.json"):
-        if f.name == "shell.json":
-            continue
-        prof = load_json(f.name)
-        if prof.get("client") == client and (kind is None or prof.get("kind") == kind):
-            return prof
-    return None
-
-
-def check_db_client(argv: list[str]) -> tuple[bool, str]:
-    """Диспатч по kind профиля клиента: sql / mongo / redis."""
-    client = os.path.basename(argv[0])
-    prof = find_client_profile(client)
-    if not prof:
-        return False, f"нет профиля для клиента {client}"
-    kind = prof.get("kind")
-    if kind == "sql":
+def dispatch_plugin(
+    plugin: str, prof: dict, argv: list[str], shell: dict, depth: int
+) -> tuple[bool, str]:
+    """Разбор команды плагина его handler'ом (объявлен в профиле)."""
+    handler = prof.get("handler")
+    if handler == "sql":
         return check_sql_client(argv, prof)
-    if kind == "mongo":
+    if handler == "mongo":
         return check_mongo_client(argv, prof)
-    if kind == "redis":
+    if handler == "redis":
         return check_redis_client(argv, prof)
-    return False, f"клиент {client}: профиль kind={kind!r} не поддержан гардом"
+    if handler == "rabbitmq":
+        return check_rabbitmqctl(argv, prof)
+    if handler == "docker":
+        return check_docker(argv, prof, shell, depth)
+    if handler == "http":
+        return check_curl(argv, prof)
+    if handler == "ssh":
+        return check_ssh(argv, shell, depth)
+    return False, f"плагин {plugin}: неизвестный handler {handler!r}"
 
 
 def check_sql_client(argv: list[str], prof: dict) -> tuple[bool, str]:
@@ -336,7 +342,7 @@ def host_internal(host: str) -> bool:
         return "." not in host
 
 
-def check_curl(argv: list[str], shell: dict) -> tuple[bool, str]:
+def check_curl(argv: list[str], prof: dict) -> tuple[bool, str]:
     urls: list[str] = []
     i = 1
     while i < len(argv):
@@ -381,13 +387,13 @@ def check_curl(argv: list[str], shell: dict) -> tuple[bool, str]:
         i += 1
     if not urls:
         return False, "curl без URL"
-    allow_ext = [h.lower() for h in shell.get("http_external_allow", [])]
+    allow_ext = [h.lower() for h in prof.get("external_allow", [])]
     for u in urls:
         host = url_host(u)
         if not host_internal(host) and host not in allow_ext:
             return False, (
                 f"curl {host}: внешний хост запрещён (внутренняя сеть свободно, "
-                f"внешнее — только из http_external_allow)"
+                f"внешнее — только из external_allow в http-профиле)"
             )
     return True, "curl GET (internal)"
 
@@ -423,44 +429,46 @@ def check_docker_exec(rest: list[str], shell: dict, depth: int) -> tuple[bool, s
     return False, "docker exec без контейнера и внутренней команды"
 
 
-def check_compose(args: list[str], shell: dict) -> tuple[bool, str]:
+def check_compose(args: list[str], prof: dict) -> tuple[bool, str]:
     sub, rest = subcommand(args, COMPOSE_VALUE_FLAGS)
     if sub is None:
         return False, "docker compose без подкоманды"
-    if sub not in shell.get("docker_compose_read_subcommands", []):
+    if sub not in prof.get("compose_read_subcommands", []):
         return False, f"docker compose {sub}: не read-only"
     if sub == "logs" and has_follow(rest):
         return False, "docker compose logs -f стримит бесконечно; используй --tail N"
     return True, f"docker compose {sub}"
 
 
-def check_docker(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
+def check_docker(
+    argv: list[str], prof: dict, shell: dict, depth: int
+) -> tuple[bool, str]:
     binary = os.path.basename(argv[0])
     if binary == "docker-compose":
-        return check_compose(argv[1:], shell)
+        return check_compose(argv[1:], prof)
     sub, rest = subcommand(argv[1:], DOCKER_VALUE_FLAGS)
     if sub is None:
         if any(a in ("--version", "-v") for a in argv[1:]):
             return True, "docker --version"
         return False, "docker без подкоманды"
     if sub == "compose":
-        return check_compose(rest, shell)
+        return check_compose(rest, prof)
     if sub == "exec":
         return check_docker_exec(rest, shell, depth)
-    if sub in shell.get("docker_read_subcommands", []):
+    if sub in prof.get("read_subcommands", []):
         if sub == "logs" and has_follow(rest):
             return False, "docker logs -f стримит бесконечно; используй --tail N"
         if sub == "stats" and "--no-stream" not in rest:
             return False, "docker stats без --no-stream стримит; добавь --no-stream"
         return True, f"docker {sub}"
-    noun_reads = shell.get("docker_noun_reads", {})
+    noun_reads = prof.get("noun_reads", {})
     if sub in noun_reads:
         verb, _ = subcommand(rest, set())
         if verb in noun_reads[sub]:
             return True, f"docker {sub} {verb}"
         ok = ", ".join(noun_reads[sub])
         return False, f"docker {sub} {verb}: не read-only (разрешены: {ok})"
-    allowed = ", ".join(shell.get("docker_read_subcommands", []))
+    allowed = ", ".join(prof.get("read_subcommands", []))
     return False, f"docker {sub}: не read-only (разрешены: {allowed}; exec с read-командой; compose)"
 
 
@@ -475,10 +483,7 @@ def check_systemctl(argv: list[str], shell: dict) -> tuple[bool, str]:
     return False, f"systemctl {sub}: не read-only"
 
 
-def check_rabbitmqctl(argv: list[str]) -> tuple[bool, str]:
-    prof = find_client_profile("rabbitmqctl", kind="verb")
-    if not prof:
-        return False, "нет профиля rabbitmq"
+def check_rabbitmqctl(argv: list[str], prof: dict) -> tuple[bool, str]:
     sub, _ = subcommand(argv[1:], set(prof.get("value_flags", [])))
     if sub is None:
         return False, "rabbitmqctl без подкоманды"
@@ -558,25 +563,17 @@ def check_simple(argv: list[str], shell: dict, depth: int) -> tuple[bool, str]:
     for tok in argv[1:]:
         if forbidden_path(tok):
             return False, f"чтение спецфайла {tok} запрещено (сырое устройство/бесконечный источник)"
-    # On-host сервис читает локально; egress закрыт, чтобы инъекция не увела данные
-    # наружу. DB-клиенты не режем — чтение БД идёт в readonly-роль, это цель.
     if name in ("curl", "ssh") and os.environ.get("SRV_EXPLORE_NO_NETWORK"):
         return False, f"{name}: сетевые команды отключены (SRV_EXPLORE_NO_NETWORK) — egress закрыт"
-    plugin = PLUGIN_OF.get(name)
-    if plugin and not plugin_enabled(plugin):
-        return False, f"плагин '{plugin}' выключен админом — {name} запрещён"
-    if name in DB_CLIENTS:
-        return check_db_client(argv)
-    if name == "curl":
-        return check_curl(argv, shell)
-    if name in ("docker", "docker-compose"):
-        return check_docker(argv, shell, depth)
+    # Кросс-граничные семейства = плагины (profiles/*.json). Владелец команды выключен
+    # → deny; включён → разбор его handler'ом. Нет владельца → локальная команда ниже.
+    plugin = registry()["cmd_of"].get(name)
+    if plugin:
+        if not plugin_enabled(plugin):
+            return False, f"плагин '{plugin}' выключен админом — {name} запрещён"
+        return dispatch_plugin(plugin, registry()["prof_of"][plugin], argv, shell, depth)
     if name == "systemctl":
         return check_systemctl(argv, shell)
-    if name == "rabbitmqctl":
-        return check_rabbitmqctl(argv)
-    if name == "ssh":
-        return check_ssh(argv, shell, depth)
     if name == "tail" and tail_follows(argv[1:]):
         return False, "tail -f/-F/--follow повесит агента; используй -n/--lines"
     if name == "journalctl":

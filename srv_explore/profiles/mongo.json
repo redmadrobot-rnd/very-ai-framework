@@ -1,4 +1,8 @@
 {
+  "plugin": "mongo",
+  "commands": ["mongosh"],
+  "desc": "mongosh --eval (read-методы, без $out/$merge/runCommand)",
+  "handler": "mongo",
   "name": "mongodb",
   "kind": "mongo",
   "client": "mongosh",

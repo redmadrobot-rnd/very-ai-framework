@@ -1,4 +1,8 @@
 {
+  "plugin": "redis",
+  "commands": ["redis-cli"],
+  "desc": "redis-cli (read-глаголы, CONFIG только GET)",
+  "handler": "redis",
   "name": "redis",
   "kind": "redis",
   "client": "redis-cli",

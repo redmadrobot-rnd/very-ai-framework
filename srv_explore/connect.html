@@ -43,8 +43,8 @@
 
   <div class="step"><div class="n">2</div><div>
     <h3>Отдай админу публичную часть</h3>
-    <p>Файл <code>~/.ssh/srvx.pub</code> + скажи, как тебя подписать. В ответ получишь
-    токен <code>srvx_…</code> (показывается один раз).</p>
+    <p>Файл <code>~/.ssh/srvx.pub</code> + как тебя подписать. Админ добавит ключ —
+    токен дальше получишь сам (шаг 4).</p>
   </div></div>
 
   <div class="step"><div class="n">3</div><div>
@@ -54,11 +54,23 @@
   </div></div>
 
   <div class="step"><div class="n">4</div><div>
+    <h3>Получи токен по своему ключу</h3>
+    <p>Через туннель, доказав владение приватным ключом (challenge → подпись):</p>
+    <pre>KEY=~/.ssh/srvx
+N=$(curl -s http://localhost:8765/token/challenge | sed 's/.*"nonce":"//;s/".*//')
+printf %s "$N" > /tmp/srvx.n && ssh-keygen -Y sign -f "$KEY" -n srv-explore /tmp/srvx.n
+SIG=$(base64 < /tmp/srvx.n.sig | tr -d '\n')
+curl -s -X POST http://localhost:8765/token/redeem -H 'Content-Type: application/json' \
+  -d "{\"pubkey\":\"$(cat $KEY.pub)\",\"nonce\":\"$N\",\"signature_b64\":\"$SIG\"}"</pre>
+    <p>В ответе — твой <code>srvx_…</code> токен.</p>
+  </div></div>
+
+  <div class="step"><div class="n">5</div><div>
     <h3>Подключи MCP в Claude Code</h3>
     <pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp \
   --header "Authorization: Bearer srvx_…"</pre>
     <p>Дальше — инструмент <code>srv_explore(task)</code>: вопрос на естественном языке,
-    в ответ findings-отчёт.</p>
+    в ответ findings-отчёт. Или спрашивай прямо в <a href="/admin">/admin</a>.</p>
   </div></div>
 
   <div class="note">Агент физически не может писать: read-only ФС на уровне ядра,

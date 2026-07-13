@@ -1,4 +1,8 @@
 {
+  "plugin": "postgres",
+  "commands": ["psql"],
+  "desc": "psql (одна read-инструкция за запрос)",
+  "handler": "sql",
   "name": "postgres",
   "kind": "sql",
   "client": "psql",

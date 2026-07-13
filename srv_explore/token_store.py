@@ -102,6 +102,15 @@ class TokenStore:
             return True
         return False
 
+    def revoke_label(self, label: str) -> int:
+        """Убрать все токены с этой меткой (снятие пользователя). Вернуть счётчик."""
+        before = len(self._records)
+        self._records = [r for r in self._records if r.label != label]
+        removed = before - len(self._records)
+        if removed:
+            self._save()
+        return removed
+
     def list(self) -> list[TokenRecord]:
         return list(self._records)
 

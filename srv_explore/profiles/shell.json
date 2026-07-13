@@ -1,5 +1,5 @@
 {
-  "note": "Allowlist read-команд для гарда (default-deny). Разрешить ИМЯ команды недостаточно — у ряда утилит есть write/exec/exfil-флаги, они проверяются в guard.py per-command: sort -o, date -s, netstat -c, yq -i/--split-exp, curl (allowlist безопасного GET), ssh (allowlist флагов, без -o/-F/туннелей = локальное исполнение через ProxyCommand). Исключены намеренно: интерпретаторы sed/awk (пишут sed w / awk print>, исполняют sed e / awk system|getline), env (исполняет команду), DNS-резолверы dig/nslookup/host/getent и hostname (эксфильтрация через DNS / смена хоста — egress вне зоны гарда, полагаемся на egress-контроль хоста). Чтение /dev/* и /proc/kcore блокируется (сырое устройство/бесконечный источник). docker/systemctl — verb-dispatch: только перечисленные read-подкоманды. Noun-формы (system/image/volume/network/…) — только их read-глаголы из docker_noun_reads (df/ls/inspect), write (prune/rm) режется. docker exec — рекурсивная проверка вложенной команды. tail/journalctl -f, docker logs -f, docker stats без --no-stream — блок как зависание. Бинари конкретного сервера (nginx/ufw/… — то, что варьируется от стенда к стенду) описываются декларативно в command_rules (read_verbs — только read-подкоманда; allow_flags — whitelist флагов + value_flags/require_flag), движок читает их generically: новый серверный инструмент = запись в этот JSON, код не трогаем.",
+  "note": "Локальная база гарда (default-deny): read-команды, чей эффект НЕ выходит за пределы OS-песочницы. Разрешить ИМЯ мало — write/exec/exfil-флаги проверяются в guard.py per-command (sort -o, date -s, netstat -c, yq -i, find -exec). Исключены намеренно: интерпретаторы sed/awk, env, DNS-резолверы dig/getent/hostname. Чтение /dev/* и /proc/kcore блокируется. Кросс-граничные семейства (docker/БД/curl/ssh) вынесены в отдельные profiles/*.json как плагины — здесь их НЕТ. Бинари конкретного сервера (nginx/ufw/…) — декларативно в command_rules (read_verbs / allow_flags+value_flags/require_flag), движок читает generically.",
   "read_commands": [
     "cat", "ls", "grep", "egrep", "fgrep", "head", "tail", "wc", "sort",
     "uniq", "cut", "tr", "jq", "yq", "stat", "date", "echo", "printf",
@@ -10,37 +10,14 @@
     "nproc", "arch", "lscpu", "lsblk", "lsmem", "getconf", "lsb_release",
     "dpkg-query"
   ],
-  "docker_read_subcommands": [
-    "ps", "inspect", "logs", "images", "stats", "top", "port",
-    "version", "info", "df", "history"
-  ],
-  "http_external_allow": [],
   "command_rules": {
     "nginx": { "allow_flags": ["-v", "-V", "-t", "-T"] },
     "ufw": { "read_verbs": ["status", "show", "version"] },
     "crontab": { "allow_flags": ["-l", "-u"], "value_flags": ["-u"], "require_flag": "-l" }
   },
-  "docker_noun_reads": {
-    "system": ["df", "info"],
-    "image": ["ls", "inspect", "history"],
-    "container": ["ls", "inspect", "port", "diff"],
-    "volume": ["ls", "inspect"],
-    "network": ["ls", "inspect"],
-    "context": ["ls", "inspect", "show"],
-    "node": ["ls", "inspect"],
-    "config": ["ls", "inspect"]
-  },
-  "docker_compose_read_subcommands": [
-    "ps", "logs", "config", "top", "images", "version"
-  ],
   "systemctl_read_subcommands": [
     "status", "is-active", "is-enabled", "is-failed", "list-units",
     "list-unit-files", "list-timers", "list-sockets", "list-dependencies",
     "show", "cat", "get-default", "help"
-  ],
-  "curl_forbidden_flags": [
-    "-X", "--request", "-d", "--data", "--data-raw", "--data-binary",
-    "--data-urlencode", "-F", "--form", "-T", "--upload-file", "-o",
-    "--output", "-O", "--remote-name"
   ]
 }

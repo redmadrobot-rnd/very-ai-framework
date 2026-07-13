@@ -1,0 +1,24 @@
+{
+  "plugin": "docker",
+  "commands": ["docker", "docker-compose"],
+  "desc": "docker / docker-compose (read-подкоманды, exec с read-командой)",
+  "handler": "docker",
+  "note": "verb-dispatch: только read-подкоманды. Noun-формы (system/image/volume/…) — только read-глаголы из noun_reads (df/ls/inspect), write (prune/rm) режется. docker exec — рекурсивная проверка вложенной команды тем же гардом. logs -f / stats без --no-stream — блок как зависание. docker несовместим с OS-песочницей (демон вне namespace) — поэтому и держится на гарде.",
+  "read_subcommands": [
+    "ps", "inspect", "logs", "images", "stats", "top", "port",
+    "version", "info", "df", "history"
+  ],
+  "noun_reads": {
+    "system": ["df", "info"],
+    "image": ["ls", "inspect", "history"],
+    "container": ["ls", "inspect", "port", "diff"],
+    "volume": ["ls", "inspect"],
+    "network": ["ls", "inspect"],
+    "context": ["ls", "inspect", "show"],
+    "node": ["ls", "inspect"],
+    "config": ["ls", "inspect"]
+  },
+  "compose_read_subcommands": [
+    "ps", "logs", "config", "top", "images", "version"
+  ]
+}

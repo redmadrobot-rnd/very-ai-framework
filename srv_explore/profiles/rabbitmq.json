@@ -1,4 +1,8 @@
 {
+  "plugin": "rabbitmq",
+  "commands": ["rabbitmqctl"],
+  "desc": "rabbitmqctl (list_*/status/cluster_status)",
+  "handler": "rabbitmq",
   "name": "rabbitmq",
   "kind": "verb",
   "client": "rabbitmqctl",

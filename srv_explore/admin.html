@@ -36,7 +36,11 @@
     font: inherit; padding: .5rem .7rem; border: 1px solid var(--bd); border-radius: 8px;
     background: var(--surface2); color: var(--tx); outline: none; transition: border-color .15s, box-shadow .15s;
   }
-  input::placeholder { color: #5b636d; }
+  textarea { font: inherit; width: 100%; resize: vertical; padding: .6rem .7rem;
+    border: 1px solid var(--bd); border-radius: 8px; background: var(--surface2);
+    color: var(--tx); outline: none; }
+  textarea:focus { border-color: var(--acc); box-shadow: 0 0 0 3px #2f81f733; }
+  input::placeholder, textarea::placeholder { color: #5b636d; }
   input:focus, select:focus { border-color: var(--acc); box-shadow: 0 0 0 3px #2f81f733; }
   button {
     font: inherit; font-weight: 550; padding: .5rem .85rem; border-radius: 8px; cursor: pointer;
@@ -126,16 +130,26 @@
   </div>
 
   <div id="app" style="display:none">
-    <h2>Токены доступа <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— пользователи</span></h2>
+    <h2>Спросить сервер <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— readonly-разведка на месте</span></h2>
+    <div class="card">
+      <textarea id="ask" rows="3" placeholder="Напр.: что занимает место на диске? какие контейнеры перезапускались? почему сервис отдаёт 502?"></textarea>
+      <div class="bar" style="margin-top:.6rem">
+        <button class="primary" id="askbtn" onclick="ask()">Спросить</button>
+        <span id="askstatus" class="muted"></span>
+      </div>
+      <div id="askout"></div>
+    </div>
+
+    <h2>Пользователи <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— ключ + ссылка, токен инженер получает сам</span></h2>
     <div class="card">
       <div class="bar">
-        <input id="lbl" placeholder="кому / зачем (label)" size="24">
-        <input id="pubkey" placeholder="SSH public key (ssh-ed25519 AAAA… — опционально)" style="flex:1;min-width:260px">
-        <button class="primary" onclick="issue()">Добавить юзера</button>
+        <input id="lbl" placeholder="кому / зачем (label)" size="20">
+        <input id="pubkey" placeholder="SSH public key (ssh-ed25519 AAAA…)" style="flex:1;min-width:260px">
+        <button class="primary" onclick="addUser()">Добавить</button>
       </div>
       <div id="issued"></div>
       <div class="gap tbl-card">
-        <table id="toktbl"><thead><tr><th>id</th><th>label</th><th>создан</th><th></th></tr></thead><tbody></tbody></table>
+        <table id="usertbl"><thead><tr><th>label</th><th>ключ</th><th></th></tr></thead><tbody></tbody></table>
       </div>
     </div>
 
@@ -171,7 +185,7 @@ function saveToken() {
 async function boot() {
   if (!tok()) { $("#authmsg").textContent = "введи админ-токен"; return; }
   try {
-    await loadTokens();
+    await loadUsers();
     $("#app").style.display = "";
     $("#authmsg").textContent = "";
     $("#authmsg").className = "muted";
@@ -228,39 +242,67 @@ async function togglePlugin(name, enabled) {
   loadPlugins();
 }
 
-async function loadTokens() {
-  const d = await (await api("/admin/api/tokens")).json();
-  const tb = $("#toktbl tbody"); tb.innerHTML = "";
-  for (const t of d.tokens) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td><code class="id">${esc(t.id)}</code></td><td>${esc(t.label)}</td><td class="muted">${esc(t.created)}</td>
-      <td><button class="danger" onclick="revoke('${esc(t.id)}')">отозвать</button></td>`;
-    tb.appendChild(tr);
-  }
-  if (!d.tokens.length) tb.innerHTML = `<tr><td colspan="4" class="muted">нет выданных токенов</td></tr>`;
+let askTimer = null;
+async function ask() {
+  const task = $("#ask").value.trim();
+  if (!task) { alert("введи вопрос"); return; }
+  clearInterval(askTimer);
+  $("#askbtn").disabled = true;
+  $("#askstatus").textContent = "запускаю…";
+  $("#askout").innerHTML = "";
+  let d;
+  try {
+    d = await (await api("/admin/api/ask", { method: "POST", body: JSON.stringify({ task }) })).json();
+  } catch (e) { $("#askbtn").disabled = false; $("#askstatus").textContent = e.message; return; }
+  if (!d.job_id) { $("#askbtn").disabled = false; $("#askstatus").textContent = d.error || "ошибка"; return; }
+  $("#askstatus").textContent = "агент работает…";
+  askTimer = setInterval(() => pollAsk(d.job_id), 2000);
 }
 
-async function issue() {
+async function pollAsk(jobId) {
+  let j;
+  try { j = await (await api("/admin/api/ask/" + encodeURIComponent(jobId))).json(); }
+  catch (e) { return; }
+  const n = j.steps ? j.steps.length : 0;
+  if (j.status === "running") { $("#askstatus").textContent = `агент работает… (команд: ${n})`; return; }
+  clearInterval(askTimer);
+  $("#askbtn").disabled = false;
+  $("#askstatus").textContent = j.status === "done" ? `готово · команд: ${n}` : "ошибка";
+  const ans = j.error ? `<pre class="err">${esc(j.error)}</pre>` : `<pre>${esc(j.result || "—")}</pre>`;
+  const cmds = n ? `<details class="cmds" style="margin-top:.6rem"><summary>команды (${n})</summary><div class="steps">` +
+    j.steps.map(s => `<div class="step"><span class="st ${s.ok ? "done" : "error"}">${s.ok ? "ok" : "deny"}</span> <code>${esc(s.cmd)}</code>${s.ok ? "" : ` <span class="muted">${esc(s.reason)}</span>`}</div>`).join("") + `</div></details>` : "";
+  $("#askout").innerHTML = ans + cmds;
+  loadRuns();
+}
+
+async function loadUsers() {
+  const d = await (await api("/admin/api/users")).json();
+  const tb = $("#usertbl tbody"); tb.innerHTML = "";
+  for (const u of d.users) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(u.label)}</td><td class="muted"><code class="id">${esc(u.type)} ${esc(u.fp)}</code></td>
+      <td><button class="danger" onclick="removeUser('${esc(u.label)}')">удалить</button></td>`;
+    tb.appendChild(tr);
+  }
+  if (!d.users.length) tb.innerHTML = `<tr><td colspan="3" class="muted">нет пользователей</td></tr>`;
+}
+
+async function addUser() {
   const label = $("#lbl").value.trim();
-  if (!label) { alert("укажи label"); return; }
   const pubkey = $("#pubkey").value.trim();
-  const r = await api("/admin/api/tokens", { method: "POST", body: JSON.stringify({ label, pubkey }) });
+  if (!label || !pubkey) { alert("нужны label и публичный ключ"); return; }
+  const r = await api("/admin/api/users", { method: "POST", body: JSON.stringify({ label, pubkey }) });
   const d = await r.json();
   if (!r.ok) { alert(d.error || "ошибка"); return; }
   $("#lbl").value = ""; $("#pubkey").value = "";
-  const guide = d.key_added
-    ? `<div class="muted" style="margin-top:.6rem">ключ добавлен — инженеру для подключения:</div><pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@${esc(d.host)} -i &lt;key&gt;
-claude mcp add --transport http srv-explore http://localhost:8765/mcp \\
-  --header "Authorization: Bearer ${esc(d.token)}"</pre>`
-    : ``;
-  $("#issued").innerHTML = `<div class="tok">Токен для <b>${esc(d.record.label)}</b> — покажется <b>один раз</b>, скопируй и отдай инженеру:<br><code>${esc(d.token)}</code>${guide}</div>`;
-  loadTokens();
+  $("#issued").innerHTML = `<div class="tok">Юзер <b>${esc(d.label)}</b> добавлен. Отдай инженеру ссылку — токен он получит сам:<br><code>http://${esc(d.host)}:8765/</code> (через туннель — http://localhost:8765/)</div>`;
+  loadUsers();
 }
 
-async function revoke(id) {
-  if (!confirm("Отозвать токен " + id + "? SSH-ключ юзера тоже будет снят.")) return;
-  await api("/admin/api/tokens/" + encodeURIComponent(id) + "/revoke", { method: "POST" });
-  loadTokens();
+async function removeUser(label) {
+  if (!confirm("Удалить " + label + "? Ключ и все его токены будут сняты.")) return;
+  await api("/admin/api/users/remove", { method: "POST", body: JSON.stringify({ label }) });
+  loadUsers();
 }
 
 async function loadRuns() {

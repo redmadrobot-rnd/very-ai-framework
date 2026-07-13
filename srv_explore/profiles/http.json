@@ -1,0 +1,8 @@
+{
+  "plugin": "http",
+  "commands": ["curl"],
+  "desc": "curl (только GET/HEAD, внутренняя сеть; внешнее по allowlist)",
+  "handler": "http",
+  "note": "Только безопасный GET/HEAD (allowlist флагов в guard.py, deny-unknown). Назначение — внутренняя сеть (приватные IP/loopback/короткие имена); внешние хосты закрыты, кроме external_allow. Это режет и эксфильтрацию через GET-запрос на публичный хост.",
+  "external_allow": []
+}
