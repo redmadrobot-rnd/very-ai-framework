@@ -20,13 +20,11 @@ import contextvars
 import json
 import os
 import secrets
-import subprocess
-import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, plugin_store, tunnel_keys
+from srv_explore import backstop, guard, profile_store, tunnel_keys
 from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
 
@@ -36,7 +34,6 @@ def _now() -> str:
 
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_GUARD = HERE / "guard.py"
 DEFAULT_PROMPT = HERE / "agent_prompt.md"
 ADMIN_PAGE = HERE / "admin.html"
 
@@ -55,10 +52,6 @@ CURRENT_TOKEN: contextvars.ContextVar = contextvars.ContextVar(
 CURRENT_STEPS: contextvars.ContextVar = contextvars.ContextVar(
     "srv_explore_steps", default=None
 )
-
-
-def guard_path() -> Path:
-    return Path(os.environ.get("SRV_EXPLORE_GUARD", str(DEFAULT_GUARD)))
 
 
 # --- авторизация (чистая, тестируемая) ---------------------------------------
@@ -104,31 +97,16 @@ def admin_authorized(authorization: str | None) -> bool:
 def guard_decision(
     tool_name: str, tool_input: dict, session_id: str = "mcp"
 ) -> tuple[bool, str]:
-    """Прогнать команду через guard.py как рантайм Claude Code. (allow, reason)."""
+    """Решение гарда в процессе (без спавна): (allow, reason).
+
+    Профили импортятся один раз (guard кеширует реестр); per-command — вызовы функций.
+    """
     if tool_name != "Bash":
         return True, "не Bash — гард не применяется"
-    payload = json.dumps(
-        {"tool_name": tool_name, "tool_input": tool_input, "session_id": session_id}
-    )
-    proc = subprocess.run(
-        [sys.executable, str(guard_path())],
-        input=payload,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=dict(os.environ),
-    )
-    reason = ""
-    try:
-        decision = json.loads(proc.stdout) if proc.stdout.strip() else {}
-        reason = decision.get("hookSpecificOutput", {}).get(
-            "permissionDecisionReason", ""
-        )
-    except ValueError:
-        reason = ""
-    if not reason:
-        reason = (proc.stderr or "").strip() or "решение гарда"
-    return proc.returncode == 0, reason
+    command = (tool_input or {}).get("command", "")
+    if not command.strip():
+        return False, "пустая команда"
+    return guard.check_command_string(command)
 
 
 def make_pretooluse_hook():
@@ -381,7 +359,7 @@ def build_app(store: TokenStore | None = None):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
         return JSONResponse(job)
 
-    async def admin_plugins(request):
+    async def admin_profiles(request):
         denied = _require_admin(request)
         if denied:
             return denied
@@ -389,17 +367,17 @@ def build_app(store: TokenStore | None = None):
             body = await request.json()
             name = body.get("name", "")
             try:
-                plugin_store.set_enabled(name, bool(body.get("enabled")))
+                profile_store.set_enabled(name, bool(body.get("enabled")))
             except KeyError:
-                return JSONResponse({"error": "неизвестный плагин"}, status_code=404)
+                return JSONResponse({"error": "неизвестный профиль"}, status_code=404)
             except OSError as e:
                 return JSONResponse({"error": repr(e)}, status_code=500)
-        state = plugin_store.load()
+        state = profile_store.load()
         return JSONResponse(
             {
-                "plugins": [
+                "profiles": [
                     {"name": n, "desc": d, "enabled": state[n]}
-                    for n, d in plugin_store.registry().items()
+                    for n, d in profile_store.registry().items()
                 ]
             }
         )
@@ -427,7 +405,7 @@ def build_app(store: TokenStore | None = None):
             Route("/admin/api/users/remove", admin_user_remove, methods=["POST"]),
             Route("/admin/api/runs", admin_runs),
             Route("/admin/api/security", admin_security),
-            Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
+            Route("/admin/api/profiles", admin_profiles, methods=["GET", "POST"]),
             Route("/admin/api/ask", admin_ask, methods=["POST"]),
             Route("/admin/api/ask/{job_id}", admin_ask_status),
             Mount("/", app=mcp.streamable_http_app()),

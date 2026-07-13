@@ -57,14 +57,13 @@ chown -R "$USER_NAME:$USER_NAME" "$APP_DIR/venv"
 # 5. env-файл (несекретные дефолты; CLAUDE_CODE_OAUTH_TOKEN дописывает деплой)
 if [ ! -f "$CFG_DIR/env" ]; then
   cat > "$CFG_DIR/env" <<EOF
-SRV_EXPLORE_NO_NETWORK=1
 SRV_EXPLORE_HOST=127.0.0.1
 SRV_EXPLORE_PORT=8765
 SRV_EXPLORE_CWD=/
-SRV_EXPLORE_GUARD=$APP_DIR/srv_explore/guard.py
 SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
 SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
 SRV_EXPLORE_RUNS=$STATE_DIR/runs.json
+SRV_EXPLORE_PROFILE_STATE=$STATE_DIR/profiles.json
 SRV_EXPLORE_HISTORY_PER_USER=15
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели для агента) — дописывает деплой, не коммитить.
 # SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
@@ -76,6 +75,7 @@ fi
 # 5b. ключи, которых может не быть в уже существующем env (идемпотентно)
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
 ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.json"
+ensure_env_kv SRV_EXPLORE_PROFILE_STATE "$STATE_DIR/profiles.json"
 ensure_env_kv SRV_EXPLORE_HISTORY_PER_USER 15
 
 # 5c. админ-токен /admin — генерим ОДИН раз (переустановка не трогает выданный)

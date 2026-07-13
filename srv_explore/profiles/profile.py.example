@@ -1,0 +1,50 @@
+"""ОБРАЗЕЦ профиля srv-explore. Скан грузит profiles/*.py — этот файл (.py.example)
+НЕ подхватывается. Скопируй в <id>.py, поправь ID/COMMANDS/DESC и логику check.
+
+Профиль описывает одно семейство команд и что в нём — только чтение.
+Не подключён/выключен в админке → все его COMMANDS блокируются.
+Подключён → решает его check(argv, g).
+
+Контракт (обязательно):
+    ID:       str          — уникальный id, он же ключ тумблера в админке
+    COMMANDS: list[str]    — бинарники, которыми владеет профиль
+    DESC:     str          — одна строка для админки
+    def check(argv, g) -> (ok: bool, reason: str)
+
+g — тулкит хелперов ядра (см. guard.py, class Toolkit):
+    g.verbs(argv, allow=[...], subreads={V:[S]}, value_flags=[...],
+            deny_flags=[...], allow_flags=[...], require_flag=..., allow_bare=False,
+            no_follow=False)          # verb+flag движок — покрывает большинство CLI
+    g.sql(argv, cmd_flags=[...], file_flags=[...], allow_prefixes=[...], forbid=[...])
+    g.mongo(argv, eval_flags=[...], file_flags=[...], forbid=[...])
+    g.curl(argv, internal_only=True, external_allow=[...])
+    g.docker(argv, reads=[...], noun_reads={...}, compose_reads=[...])
+    g.read_util(argv, read_commands)  # базовые read-утилиты + write-флаг-стражи
+    g.recurse(argv)                   # прогнать вложенную команду через весь гард
+    g.name(argv), g.subcommand(argv, value_flags)
+
+Простой случай (read-CLI с глаголами) — одна строка на g.verbs:
+"""
+
+ID = "myredis"
+COMMANDS = ["myredis-cli"]
+DESC = "myredis-cli (пример: только read-глаголы)"
+
+
+def check(argv, g):
+    return g.verbs(
+        argv,
+        value_flags=["-h", "-p", "-a"],      # флаги со значением (съедают токен)
+        deny_flags=["--eval", "--pipe"],     # любой → deny
+        allow=["GET", "MGET", "INFO", "PING"],  # первый позиционный ∈ этого
+        subreads={"CONFIG": ["GET"]},        # двухуровневый: CONFIG GET
+    )
+
+
+# Сложный случай — пишешь настоящую логику, зовёшь хелперы точечно:
+#
+#   def check(argv, g):
+#       sub, rest = g.subcommand(argv)
+#       if sub == "exec":
+#           return g.recurse(rest[1:])       # вложенную команду — через весь гард
+#       return g.verbs(argv, allow=["ps", "logs", "inspect"], no_follow=True)
