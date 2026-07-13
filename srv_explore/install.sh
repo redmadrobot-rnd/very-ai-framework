@@ -12,7 +12,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # каталог бандла (srv_explore/)
 APP_DIR=/opt/srv-explore
 CFG_DIR=/etc/srv-explore
-STATE_DIR=/var/lib/srv-explore   # writable: tokens.json + runs.json
+STATE_DIR=/var/lib/srv-explore   # writable: tokens.json, profiles.json, tunnel_keys
 USER_NAME=srv-explore
 
 echo "==> srv-explore install (src=$SRC)"
@@ -63,9 +63,7 @@ SRV_EXPLORE_PORT=8765
 SRV_EXPLORE_CWD=/
 SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
 SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
-SRV_EXPLORE_RUNS=$STATE_DIR/runs.json
 SRV_EXPLORE_PROFILE_STATE=$STATE_DIR/profiles.json
-SRV_EXPLORE_HISTORY_PER_USER=15
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели для агента) — дописывает деплой, не коммитить.
 # SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
 EOF
@@ -75,9 +73,7 @@ fi
 
 # 5b. ключи, которых может не быть в уже существующем env (идемпотентно)
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
-ensure_env_kv SRV_EXPLORE_RUNS "$STATE_DIR/runs.json"
 ensure_env_kv SRV_EXPLORE_PROFILE_STATE "$STATE_DIR/profiles.json"
-ensure_env_kv SRV_EXPLORE_HISTORY_PER_USER 15
 
 # 5c. админ-токен /admin — генерим ОДИН раз (переустановка не трогает выданный)
 if ! grep -q "^SRV_EXPLORE_ADMIN_TOKEN=" "$CFG_DIR/env"; then

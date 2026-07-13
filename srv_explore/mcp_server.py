@@ -18,12 +18,10 @@ import contextvars
 import json
 import os
 import secrets
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from srv_explore import backstop, guard, profile_store, tunnel_keys
-from srv_explore.run_store import RunRecord, RunStore
 from srv_explore.token_store import TokenStore
 
 
@@ -189,10 +187,9 @@ async def run_agent(task: str) -> tuple[str, list]:
 
 
 class JobRegistry:
-    """Живые прогоны в оперативе; завершённые уходят в RunStore."""
+    """Прогоны в оперативе (живые + недавние завершённые), капается по limit."""
 
-    def __init__(self, runs: RunStore, limit: int = 200):
-        self.runs = runs
+    def __init__(self, limit: int = 200):
         self._jobs: dict[str, dict] = {}
         self._order: list[str] = []
         self.limit = limit
@@ -227,8 +224,6 @@ class JobRegistry:
             except Exception as e:  # noqa: BLE001 — статус задачи, не глушим молча
                 if job:
                     job.update(status="error", error=repr(e), finished=_now())
-            if job:
-                self.runs.add(RunRecord(**job))
 
         asyncio.ensure_future(runner())
         return job_id
@@ -236,9 +231,8 @@ class JobRegistry:
     def get(self, job_id: str) -> dict | None:
         return self._jobs.get(job_id)
 
-    def running(self) -> list[dict]:
-        ordered = (self._jobs[i] for i in reversed(self._order))
-        return [j for j in ordered if j["status"] == "running"]
+    def recent(self, limit: int = 100) -> list[dict]:
+        return [self._jobs[i] for i in reversed(self._order)][:limit]
 
 
 # --- сборка сервера (ленивый импорт MCP/Starlette) ---------------------------
@@ -256,8 +250,7 @@ def build_app(store: TokenStore | None = None):
     from starlette.routing import Mount, Route
 
     tokens = store or TokenStore()
-    run_store = RunStore()
-    jobs = JobRegistry(run_store)
+    jobs = JobRegistry()
     security = backstop.probe()  # один раз при старте сервиса
     mcp = FastMCP("srv-explore", streamable_http_path="/mcp")
 
@@ -325,8 +318,7 @@ def build_app(store: TokenStore | None = None):
         denied = _require_admin(request)
         if denied:
             return denied
-        hist = [asdict(r) for r in run_store.list_recent(100)]
-        return JSONResponse({"runs": jobs.running() + hist})
+        return JSONResponse({"runs": jobs.recent(100)})
 
     async def admin_security(request):
         denied = _require_admin(request)

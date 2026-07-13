@@ -8,16 +8,12 @@ from srv_explore import backstop
 
 
 @pytest.mark.parametrize(
-    "fs, egress, expected",
+    "fs, expected",
     [
-        (True, True, "green"),
-        (True, False, "green"),
-        (True, None, "green"),
-        (False, True, "red"),
-        (False, None, "red"),
-        (None, None, "unknown"),
-        (None, True, "unknown"),
+        (True, "green"),
+        (False, "red"),
+        (None, "unknown"),
     ],
 )
-def test_status(fs, egress, expected) -> None:
-    assert backstop.status({"fs_readonly": fs, "egress_locked": egress}) == expected
+def test_status(fs, expected) -> None:
+    assert backstop.status({"fs_readonly": fs}) == expected
