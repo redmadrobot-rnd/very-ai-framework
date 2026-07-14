@@ -110,6 +110,13 @@
     background: #8b949e; border-radius: 50%; transition: .15s; }
   .sw input:checked + i { background: #1f6feb; }
   .sw input:checked + i:before { transform: translateX(15px); background: #fff; }
+  .sw input:disabled + i { opacity: .5; cursor: wait; }
+
+  .pdot { font-size: .8rem; font-weight: 600; white-space: nowrap; }
+  .pdot.ok { color: var(--green); }
+  .pdot.broken { color: var(--red); }
+  .pdot.setup, .pdot.error { color: var(--amber); }
+  .pdot.off { color: var(--mut); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -155,7 +162,7 @@
 
     <h2>Профили <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— выключен = запрещён</span></h2>
     <div class="card tbl-card">
-      <table id="proftbl"><thead><tr><th>профиль</th><th>что разрешает</th><th></th></tr></thead><tbody></tbody></table>
+      <table id="proftbl"><thead><tr><th>профиль</th><th>что разрешает</th><th>статус</th><th></th></tr></thead><tbody></tbody></table>
     </div>
 
     <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 15 на юзера</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
@@ -221,22 +228,81 @@ async function loadSecurity() {
   } catch (e) { $("#chips").style.display = "none"; }
 }
 
+let profBusy = false;
+function setProfBusy(b) {
+  profBusy = b;
+  document.querySelectorAll("#proftbl input, #proftbl button").forEach(x => x.disabled = b);
+}
+
+const HEALTH = {
+  ok:     { cls: "ok",     txt: "ok" },
+  broken: { cls: "broken", txt: "broken" },
+  setup:  { cls: "setup",  txt: "настроить" },
+  error:  { cls: "error",  txt: "?" },
+  off:    { cls: "off",    txt: "—" },
+};
+
 async function loadProfiles() {
   const d = await (await api("/admin/api/profiles")).json();
   const tb = $("#proftbl tbody"); tb.innerHTML = "";
   for (const p of d.profiles) {
+    const h = HEALTH[p.health] || HEALTH.error;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td><td class="muted">${esc(p.desc)}</td>
+    tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td>
+      <td class="muted">${esc(p.desc)}</td>
+      <td><span class="pdot ${h.cls}" title="${esc(p.detail || "")}">● ${h.txt}</span></td>
       <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
         onchange="toggleProfile('${esc(p.name)}', this.checked)"><i></i></label></td>`;
     tb.appendChild(tr);
+
+    const form = document.createElement("tr");
+    form.className = "drow"; form.id = "dsn-" + p.name; form.style.display = "none";
+    form.innerHTML = `<td colspan="4"><div class="detail">
+      <div class="muted" style="margin-bottom:.4rem">Админский DSN базы — <b>одноразово</b>, не сохраняется. Из него создастся read-only роль:</div>
+      <div class="bar">
+        <input type="password" id="dsnin-${esc(p.name)}" placeholder="postgresql://admin:pw@host:5432/db" style="flex:1;min-width:320px"><!-- pragma: allowlist secret -->
+        <button class="primary" onclick="saveDsn('${esc(p.name)}')">Создать роль</button>
+        <button onclick="cancelDsn('${esc(p.name)}')">Отмена</button>
+      </div></div></td>`;
+    tb.appendChild(form);
   }
 }
 
 async function toggleProfile(name, enabled) {
-  const r = await api("/admin/api/profiles", { method: "POST", body: JSON.stringify({ name, enabled }) });
-  if (!r.ok) { alert((await r.json()).error || "ошибка"); }
-  loadProfiles();
+  if (profBusy) return;
+  setProfBusy(true);
+  let r, d;
+  try {
+    r = await api("/admin/api/profiles", { method: "POST", body: JSON.stringify({ name, enabled }) });
+    d = await r.json();
+  } catch (e) { setProfBusy(false); alert(e.message); return; }
+  if (d.need_dsn) {                       // БД-профиль не настроен → просим DSN (не перерисовываем)
+    setProfBusy(false);
+    const f = $("#dsn-" + name); if (f) f.style.display = "";
+    return;
+  }
+  if (!r.ok) alert(d.error || "ошибка");
+  setProfBusy(false);
+  await loadProfiles();
+}
+
+async function saveDsn(name) {
+  const dsn = $("#dsnin-" + name).value.trim();
+  if (!dsn) { alert("вставь DSN"); return; }
+  setProfBusy(true);
+  let r, d;
+  try {
+    r = await api("/admin/api/profiles", { method: "POST", body: JSON.stringify({ name, enabled: true, admin_dsn: dsn }) });
+    d = await r.json();
+  } catch (e) { setProfBusy(false); alert(e.message); return; }
+  if (!r.ok) alert(d.error || "ошибка");
+  setProfBusy(false);
+  await loadProfiles();
+}
+
+function cancelDsn(name) {
+  const f = $("#dsn-" + name); if (f) f.style.display = "none";
+  loadProfiles();               // сбросить тумблер к состоянию сервера
 }
 
 let askTimer = null;

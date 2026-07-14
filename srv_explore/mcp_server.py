@@ -192,6 +192,7 @@ def build_app(store: TokenStore | None = None):
 
     tokens = store or TokenStore()
     jobs = JobRegistry()
+    prov_lock = asyncio.Lock()  # провижининг строго последовательный (toggle-спам)
     security = security_probe()  # один раз при старте (в песочнице агента)
     mcp = FastMCP("srv-explore", streamable_http_path="/mcp")
 
@@ -293,6 +294,26 @@ def build_app(store: TokenStore | None = None):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
         return JSONResponse(job)
 
+    async def _profiles_payload():
+        state = profile_store.load()
+        reg = profile_store.registry()
+        out = []
+        for n, d in reg.items():
+            try:
+                h = await asyncio.to_thread(provision.health, n)
+            except Exception:  # noqa: BLE001 — health не должен ронять список
+                h = {"state": "error", "detail": ""}
+            out.append(
+                {
+                    "name": n,
+                    "desc": d,
+                    "enabled": state[n],
+                    "health": h["state"],
+                    "detail": h["detail"],
+                }
+            )
+        return JSONResponse({"profiles": out})
+
     async def admin_profiles(request):
         denied = _require_admin(request)
         if denied:
@@ -301,28 +322,42 @@ def build_app(store: TokenStore | None = None):
             body = await request.json()
             name = body.get("name", "")
             enabled = bool(body.get("enabled"))
+            admin_dsn = (body.get("admin_dsn") or "").strip()
             if name not in profile_store.registry():
                 return JSONResponse({"error": "неизвестный профиль"}, status_code=404)
-            try:
-                if enabled:
-                    env = await asyncio.to_thread(provision.enable, name)
-                    if env:
-                        profile_store.add_provisioned(env)
-                else:
-                    keys = await asyncio.to_thread(provision.down, name)
-                    profile_store.drop_provisioned(keys)
-                profile_store.set_enabled(name, enabled)
-            except (subprocess.CalledProcessError, OSError, KeyError) as e:
-                return JSONResponse({"error": f"provision: {e}"}, status_code=500)
-        state = profile_store.load()
-        return JSONResponse(
-            {
-                "profiles": [
-                    {"name": n, "desc": d, "enabled": state[n]}
-                    for n, d in profile_store.registry().items()
-                ]
-            }
-        )
+            mod = profile_store.modules().get(name)
+            is_db = getattr(mod, "KIND", None) is not None  # БД-профиль (режим Б)
+            async with prov_lock:  # никаких параллельных провижинов
+                try:
+                    if not enabled:
+                        keys = await asyncio.to_thread(provision.down, name)
+                        profile_store.drop_provisioned(keys)
+                        profile_store.set_enabled(name, False)
+                    elif is_db:
+                        await asyncio.to_thread(provision.install, name)
+                        ce = getattr(mod, "CREDS_ENV", None)
+                        # уже настроено (ro-DSN выдан) → не спрашиваем DSN снова
+                        if not (ce and profile_store.provisioned().get(ce)):
+                            if not admin_dsn:
+                                return JSONResponse({"need_dsn": True, "name": name})
+                            ro = await asyncio.to_thread(
+                                provision.create_role, name, admin_dsn
+                            )
+                            profile_store.add_provisioned({ce: ro})
+                        profile_store.set_enabled(name, True)
+                    else:
+                        env = await asyncio.to_thread(provision.enable, name)
+                        if env:
+                            profile_store.add_provisioned(env)
+                        profile_store.set_enabled(name, True)
+                except (
+                    subprocess.CalledProcessError,
+                    OSError,
+                    KeyError,
+                    RuntimeError,
+                ) as e:
+                    return JSONResponse({"error": f"provision: {e}"}, status_code=500)
+        return await _profiles_payload()
 
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
