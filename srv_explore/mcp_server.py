@@ -95,19 +95,16 @@ _AGENT_PASS_ENV = [
 
 
 def security_probe() -> dict:
-    """Проба FS-хардинга в ПЕСОЧНИЦЕ агента (не сервиса — тот привилегирован).
-    Не root/нет systemd-run → in-process fallback (dev)."""
+    """Проба хардинга (FS read-only + egress обрублен) в ПЕСОЧНИЦЕ агента, не сервиса
+    (тот привилегирован). Не root/нет systemd-run → in-process fallback (dev)."""
     if not sandbox.available():
         return backstop.probe()
-    code = (
-        "import json,srv_explore.backstop as b;"
-        "print(json.dumps({'fs_readonly':b._fs_readonly()}))"
-    )
+    code = "import json,srv_explore.backstop as b;print(json.dumps(b.probe()))"
     rc, out, _ = sandbox.run([sys.executable, "-c", code])
     try:
-        return json.loads(out) if rc == 0 else {"fs_readonly": None}
+        return json.loads(out) if rc == 0 else {}
     except ValueError:
-        return {"fs_readonly": None}
+        return {}
 
 
 async def run_agent(task: str) -> tuple[str, list]:
@@ -268,7 +265,13 @@ def build_app(store: TokenStore | None = None):
         denied = _require_admin(request)
         if denied:
             return denied
-        return JSONResponse({"security": security, "status": backstop.status(security)})
+        return JSONResponse(
+            {
+                "security": security,
+                "status": backstop.status(security),
+                "net_status": backstop.net_status(security),
+            }
+        )
 
     async def admin_ask(request):
         denied = _require_admin(request)

@@ -19,7 +19,8 @@ class _Docker:
 def _mock(monkeypatch, calls):
     monkeypatch.setattr(provision.profile_store, "modules", lambda: {"docker": _Docker})
     monkeypatch.setattr(
-        provision.subprocess, "run",
+        provision.subprocess,
+        "run",
         lambda *a, **k: calls.append(a[0]) or type("P", (), {"returncode": 0}),
     )
 

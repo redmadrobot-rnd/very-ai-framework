@@ -1,0 +1,11 @@
+[Unit]
+Description=srv-explore egress forward-proxy (tinyproxy, domain allowlist)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/tinyproxy -d -c /etc/srv-explore/tinyproxy.conf
+Restart=on-failure
+RuntimeDirectory=srv-explore-proxy
+
+[Install]
+WantedBy=multi-user.target

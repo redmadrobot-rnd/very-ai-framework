@@ -61,6 +61,11 @@ SRV_EXPLORE_CWD=/
 SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
 SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
 SRV_EXPLORE_PROFILE_STATE=$STATE_DIR/profiles.json
+SRV_EXPLORE_PROXY=http://127.0.0.1:3128
+# Доверенные адреса, куда агенту МОЖНО наружу (всё прочее egress обрублен):
+#   *_DOMAINS — через прокси (список для tinyproxy), *_CIDRS — напрямую (firewall).
+SRV_EXPLORE_TRUSTED_DOMAINS=
+SRV_EXPLORE_TRUSTED_CIDRS=
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели) — дописывает деплой, не коммитить.
 # SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
 EOF
@@ -102,6 +107,54 @@ if sshd -t 2>/dev/null; then
   systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 else
   echo "!! sshd -t не прошёл — проверь drop-in вручную" >&2
+fi
+
+# 6b. egress форвард-прокси (tinyproxy): песочница агента рубит внешку (firewall), наружу
+# (API модели + доверенные домены) агент ходит ТОЛЬКО через него. FilterDefaultDeny — всё,
+# что не в allowlist, режется. Дефолтный сервис пакета глушим, крутим свой на 127.0.0.1:3128.
+if ! command -v tinyproxy >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "==> ставлю tinyproxy (форвард-прокси egress)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y tinyproxy >/dev/null
+  else
+    echo "!! tinyproxy не найден и нет apt-get — egress-прокси не поднять" >&2
+  fi
+fi
+systemctl disable --now tinyproxy 2>/dev/null || true   # стоковый сервис на 8888 — не нужен
+
+# allowlist доменов: api.anthropic.com (модель) + SRV_EXPLORE_TRUSTED_DOMAINS из env.
+# Каждый домен — extended-regex по хосту: сам домен и его поддомены.
+TRUSTED_DOMAINS="$(grep -E '^SRV_EXPLORE_TRUSTED_DOMAINS=' "$CFG_DIR/env" | cut -d= -f2- | tr ',' ' ')"
+{
+  for d in api.anthropic.com $TRUSTED_DOMAINS; do
+    [ -n "$d" ] || continue
+    printf '(^|\\.)%s$\n' "$(printf '%s' "$d" | sed 's/\./\\./g')"
+  done
+} > "$CFG_DIR/proxy-allow"
+chmod 0644 "$CFG_DIR/proxy-allow"
+
+cat > "$CFG_DIR/tinyproxy.conf" <<EOF
+Port 3128
+Listen 127.0.0.1
+Timeout 600
+Allow 127.0.0.1
+ConnectPort 443
+FilterDefaultDeny Yes
+FilterExtended On
+FilterCaseSensitive Off
+FilterURLs Off
+Filter "$CFG_DIR/proxy-allow"
+PidFile "/run/srv-explore-proxy/tinyproxy.pid"
+LogLevel Warning
+EOF
+chmod 0644 "$CFG_DIR/tinyproxy.conf"
+
+if command -v tinyproxy >/dev/null 2>&1; then
+  install -m 0644 "$APP_DIR/srv_explore/systemd/srv-explore-proxy.service" \
+    /etc/systemd/system/srv-explore-proxy.service
+  systemctl daemon-reload
+  systemctl enable srv-explore-proxy.service
+  systemctl restart srv-explore-proxy.service
 fi
 
 # 7. systemd-юнит
