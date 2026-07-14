@@ -2,6 +2,9 @@ name: PR CI
 
 on:
   pull_request:
+    # ready_for_review — иначе снятие черновика не триггерит CI (базовый набор:
+    # opened/synchronize/reopened). Джобы гейтятся по draft ниже.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
@@ -9,9 +12,12 @@ concurrency:
 
 jobs:
   checks:
+    # Черновик PR не гоняет CI — платные минуты. Снял черновик → всё бежит.
+    if: github.event.pull_request.draft == false
     uses: ./.github/workflows/_checks.yml
 
   tests:
+    if: github.event.pull_request.draft == false
     uses: ./.github/workflows/_tests.yml
     with:
       markers: 'not heavy'
