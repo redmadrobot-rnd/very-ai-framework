@@ -133,7 +133,7 @@ def _pg_run(dsn: str, sql: str):
         env={**os.environ, **_pg_env(dsn)},
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=20,
     )
     return p.returncode, p.stdout, p.stderr
 
@@ -146,6 +146,24 @@ def _run_stmt(mod, dsn: str, sql: str):
     if runner is None:
         raise KeyError(f"нет драйвера для KIND={getattr(mod, 'KIND', None)}")
     return runner(dsn, sql)
+
+
+def is_db_profile(pid: str) -> bool:
+    """БД-профиль: нужны креды (CREDS_ENV) и это не proxy-профиль (docker)."""
+    mod = _profile(pid)
+    return getattr(mod, "CREDS_ENV", None) is not None and not getattr(
+        mod, "PROXY", None
+    )
+
+
+def has_driver(pid: str) -> bool:
+    """Есть ли реализованный драйвер провижининга (иначе профиль включать нельзя)."""
+    return getattr(_profile(pid), "KIND", None) in _RUNNERS
+
+
+def ready(pid: str) -> bool:
+    """Можно ли профиль включать: не-БД можно всегда, БД — только с драйвером."""
+    return not is_db_profile(pid) or has_driver(pid)
 
 
 def create_role(pid: str, admin_dsn: str) -> str:
@@ -165,16 +183,22 @@ def create_role(pid: str, admin_dsn: str) -> str:
 
 
 def verify_dsn(pid: str, dsn: str) -> str:
-    """VERIFY = проба-нарушитель под dsn. Отклонена → 'ok', прошла → 'broken'."""
+    """VERIFY = проба-нарушитель под dsn. Прошла (запись удалась) → 'broken';
+    отбита по правам → 'ok'; не подключились/иная ошибка → 'error'."""
     mod = _profile(pid)
     v = getattr(mod, "VERIFY", None)
     if not v:
         return "ok"
     try:
-        rc, _, _ = _run_stmt(mod, dsn, v)
+        rc, _, err = _run_stmt(mod, dsn, v)
     except (OSError, subprocess.SubprocessError, KeyError):
         return "error"
-    return "broken" if rc == 0 else "ok"
+    if rc == 0:
+        return "broken"
+    # ненулевой код — отказ по правам (ждём) или недоступность (тревога). Различаем.
+    low = (err or "").lower()
+    marks = ("denied", "permission", "must be owner", "read-only")
+    return "ok" if any(s in low for s in marks) else "error"
 
 
 def _docker_health(pid: str, px: dict) -> dict:
@@ -209,15 +233,14 @@ def _docker_health(pid: str, px: dict) -> dict:
 _HEALTH_DETAIL = {
     "ok": "read-only подтверждён",
     "broken": "ЗАПИСЬ ПРОШЛА — DSN не read-only",
-    "error": "проба не выполнилась",
+    "error": "проба не выполнилась (нет коннекта?)",
 }
 
 
-def health(pid: str) -> dict:
-    """Состояние профиля: off | ok | setup | broken | error (+ detail)."""
+def probe(pid: str) -> dict:
+    """Снять состояние профиля живой пробой: ok | setup | broken | error (+ detail).
+    Зовётся ОДИН раз при включении/перепроверке; вердикт кэшируется (profile_store)."""
     mod = _profile(pid)
-    if not profile_store.load().get(pid):
-        return {"state": "off", "detail": ""}
     px = getattr(mod, "PROXY", None)
     if px:
         return _docker_health(pid, px)

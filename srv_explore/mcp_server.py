@@ -294,25 +294,33 @@ def build_app(store: TokenStore | None = None):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
         return JSONResponse(job)
 
-    async def _profiles_payload():
+    def _profiles_payload():
+        """Читает СОХРАНЁННЫЙ вердикт (health.json) — без живых проб на каждый показ."""
         state = profile_store.load()
-        reg = profile_store.registry()
+        stored = profile_store.health_all()
         out = []
-        for n, d in reg.items():
-            try:
-                h = await asyncio.to_thread(provision.health, n)
-            except Exception:  # noqa: BLE001 — health не должен ронять список
-                h = {"state": "error", "detail": ""}
+        for n, d in profile_store.registry().items():
+            h = stored.get(n, {}) if state[n] else {}
             out.append(
                 {
                     "name": n,
                     "desc": d,
                     "enabled": state[n],
-                    "health": h["state"],
-                    "detail": h["detail"],
+                    "ready": provision.ready(
+                        n
+                    ),  # False → включать нельзя (нет драйвера)
+                    "health": h.get("state", "off" if not state[n] else "unknown"),
+                    "detail": h.get("detail", ""),
                 }
             )
         return JSONResponse({"profiles": out})
+
+    async def _probe_and_store(name: str):
+        try:
+            verdict = await asyncio.to_thread(provision.probe, name)
+        except Exception:  # noqa: BLE001 — проба не должна ронять запрос
+            verdict = {"state": "error", "detail": "проба упала"}
+        profile_store.health_set(name, verdict)
 
     async def admin_profiles(request):
         denied = _require_admin(request)
@@ -326,30 +334,40 @@ def build_app(store: TokenStore | None = None):
             if name not in profile_store.registry():
                 return JSONResponse({"error": "неизвестный профиль"}, status_code=404)
             mod = profile_store.modules().get(name)
-            is_db = getattr(mod, "KIND", None) is not None  # БД-профиль (режим Б)
+            is_db = provision.is_db_profile(name)  # креды нужны и это не proxy-профиль
             async with prov_lock:  # никаких параллельных провижинов
                 try:
-                    if not enabled:
+                    if body.get("recheck"):  # перепроверка вручную, без переключения
+                        await _probe_and_store(name)
+                    elif not enabled:
                         keys = await asyncio.to_thread(provision.down, name)
                         profile_store.drop_provisioned(keys)
                         profile_store.set_enabled(name, False)
+                        profile_store.health_drop(name)
                     elif is_db:
+                        if not provision.has_driver(name):
+                            return JSONResponse(
+                                {"error": "драйвер профиля ещё не готов"},
+                                status_code=400,
+                            )
                         await asyncio.to_thread(provision.install, name)
                         ce = getattr(mod, "CREDS_ENV", None)
                         # уже настроено (ro-DSN выдан) → не спрашиваем DSN снова
                         if not (ce and profile_store.provisioned().get(ce)):
-                            if not admin_dsn:
+                            if not admin_dsn:  # DSN — обязательное условие включения БД
                                 return JSONResponse({"need_dsn": True, "name": name})
                             ro = await asyncio.to_thread(
                                 provision.create_role, name, admin_dsn
                             )
                             profile_store.add_provisioned({ce: ro})
                         profile_store.set_enabled(name, True)
+                        await _probe_and_store(name)  # вердикт снимаем ОДИН раз тут
                     else:
                         env = await asyncio.to_thread(provision.enable, name)
                         if env:
                             profile_store.add_provisioned(env)
                         profile_store.set_enabled(name, True)
+                        await _probe_and_store(name)
                 except (
                     subprocess.CalledProcessError,
                     OSError,
@@ -357,7 +375,7 @@ def build_app(store: TokenStore | None = None):
                     RuntimeError,
                 ) as e:
                     return JSONResponse({"error": f"provision: {e}"}, status_code=500)
-        return await _profiles_payload()
+        return _profiles_payload()
 
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):

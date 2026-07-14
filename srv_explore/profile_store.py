@@ -107,3 +107,36 @@ def drop_provisioned(keys) -> None:
     for k in keys:
         cur.pop(k, None)
     _write_prov(cur)
+
+
+# --- health: вердикт пробы, снятый ОДИН раз при включении (не на каждый показ) ----
+
+
+def _health_path() -> Path:
+    return store_path().with_name("health.json")
+
+
+def health_all() -> dict[str, dict]:
+    try:
+        return json.loads(_health_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_health(data: dict) -> None:
+    p = _health_path()
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def health_set(pid: str, verdict: dict) -> None:
+    cur = health_all()
+    cur[pid] = verdict
+    _write_health(cur)
+
+
+def health_drop(pid: str) -> None:
+    cur = health_all()
+    if cur.pop(pid, None) is not None:
+        _write_health(cur)

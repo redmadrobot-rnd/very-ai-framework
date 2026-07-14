@@ -235,11 +235,12 @@ function setProfBusy(b) {
 }
 
 const HEALTH = {
-  ok:     { cls: "ok",     txt: "ok" },
-  broken: { cls: "broken", txt: "broken" },
-  setup:  { cls: "setup",  txt: "настроить" },
-  error:  { cls: "error",  txt: "?" },
-  off:    { cls: "off",    txt: "—" },
+  ok:      { cls: "ok",     txt: "ok" },
+  broken:  { cls: "broken", txt: "broken" },
+  setup:   { cls: "setup",  txt: "настроить" },
+  error:   { cls: "error",  txt: "ошибка" },
+  unknown: { cls: "error",  txt: "?" },
+  off:     { cls: "off",    txt: "—" },
 };
 
 async function loadProfiles() {
@@ -248,10 +249,16 @@ async function loadProfiles() {
   for (const p of d.profiles) {
     const h = HEALTH[p.health] || HEALTH.error;
     const tr = document.createElement("tr");
+    const statusCell = p.ready
+      ? `<span class="pdot ${h.cls}" title="${esc(p.detail || "")}">● ${h.txt}</span>${
+          p.enabled ? ` <button class="rl" title="перепроверить" onclick="recheckProfile('${esc(p.name)}')">⟳</button>` : ""
+        }`
+      : `<span class="pdot off" title="драйвер провижининга ещё не реализован">скоро</span>`;
     tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td>
       <td class="muted">${esc(p.desc)}</td>
-      <td><span class="pdot ${h.cls}" title="${esc(p.detail || "")}">● ${h.txt}</span></td>
+      <td>${statusCell}</td>
       <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
+        ${p.ready ? "" : "disabled"}
         onchange="toggleProfile('${esc(p.name)}', this.checked)"><i></i></label></td>`;
     tb.appendChild(tr);
 
@@ -303,6 +310,16 @@ async function saveDsn(name) {
 function cancelDsn(name) {
   const f = $("#dsn-" + name); if (f) f.style.display = "none";
   loadProfiles();               // сбросить тумблер к состоянию сервера
+}
+
+async function recheckProfile(name) {
+  if (profBusy) return;
+  setProfBusy(true);
+  try {
+    await api("/admin/api/profiles", { method: "POST", body: JSON.stringify({ name, recheck: true }) });
+  } catch (e) { alert(e.message); }
+  setProfBusy(false);
+  await loadProfiles();
 }
 
 let askTimer = null;

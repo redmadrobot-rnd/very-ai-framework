@@ -95,7 +95,7 @@ def test_create_role_raises_on_setup_failure(monkeypatch):
 
 def test_verify_dsn_denied_is_ok(monkeypatch):
     _pg_mods(monkeypatch)
-    monkeypatch.setattr(provision, "_run_stmt", lambda *a: (1, "", "must be owner"))
+    monkeypatch.setattr(provision, "_run_stmt", lambda *a: (3, "", "permission denied"))
     assert provision.verify_dsn("postgres", "dsn") == "ok"
 
 
@@ -105,24 +105,53 @@ def test_verify_dsn_accepted_is_broken(monkeypatch):
     assert provision.verify_dsn("postgres", "dsn") == "broken"
 
 
-def test_health_off_when_disabled(monkeypatch):
+def test_verify_dsn_no_connection_is_error(monkeypatch):
+    # ненулевой код, но не по правам (база недоступна) — НЕ должен показать 'ok'
     _pg_mods(monkeypatch)
-    monkeypatch.setattr(provision.profile_store, "load", lambda: {"postgres": False})
-    assert provision.health("postgres")["state"] == "off"
+    monkeypatch.setattr(
+        provision, "_run_stmt", lambda *a: (2, "", "could not connect to server")
+    )
+    assert provision.verify_dsn("postgres", "dsn") == "error"
 
 
-def test_health_setup_when_enabled_without_creds(monkeypatch):
+def test_probe_setup_when_enabled_without_creds(monkeypatch):
     _pg_mods(monkeypatch)
-    monkeypatch.setattr(provision.profile_store, "load", lambda: {"postgres": True})
     monkeypatch.setattr(provision.profile_store, "provisioned", lambda: {})
-    assert provision.health("postgres")["state"] == "setup"
+    assert provision.probe("postgres")["state"] == "setup"
 
 
-def test_health_ok_when_verify_denied(monkeypatch):
+def test_probe_ok_when_verify_denied(monkeypatch):
     _pg_mods(monkeypatch)
-    monkeypatch.setattr(provision.profile_store, "load", lambda: {"postgres": True})
     monkeypatch.setattr(
         provision.profile_store, "provisioned", lambda: {"PG_INSPECTOR_DSN": "dsn"}
     )
     monkeypatch.setattr(provision, "verify_dsn", lambda pid, dsn: "ok")
-    assert provision.health("postgres")["state"] == "ok"
+    assert provision.probe("postgres")["state"] == "ok"
+
+
+class _NoDriverDB:  # БД-профиль без драйвера (KIND нет)
+    ID = "mongo"
+    CREDS_ENV = "MONGO_INSPECTOR_DSN"
+
+
+def test_db_profile_with_driver_is_ready(monkeypatch):
+    _pg_mods(monkeypatch)
+    assert provision.is_db_profile("postgres") is True
+    assert provision.has_driver("postgres") is True
+    assert provision.ready("postgres") is True
+
+
+def test_db_profile_without_driver_not_ready(monkeypatch):
+    monkeypatch.setattr(
+        provision.profile_store, "modules", lambda: {"mongo": _NoDriverDB}
+    )
+    assert provision.is_db_profile("mongo") is True
+    assert provision.has_driver("mongo") is False
+    assert provision.ready("mongo") is False  # включать нельзя — нет драйвера
+
+
+def test_docker_not_db_and_ready(monkeypatch):
+    calls = []
+    _mock(monkeypatch, calls)
+    assert provision.is_db_profile("docker") is False  # у docker есть PROXY
+    assert provision.ready("docker") is True

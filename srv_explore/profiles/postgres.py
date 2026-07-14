@@ -21,4 +21,5 @@ SETUP = (
     "GRANT pg_read_all_data TO {role};"
 )
 # Проба барьера под ro-DSN: должна упасть permission denied (иначе роль не read-only).
-VERIFY = "CREATE TABLE _srvx_probe (x int)"
+# Ведущий DROP делает пробу идемпотентной: остаток от broken не даёт ложный «отбито».
+VERIFY = "DROP TABLE IF EXISTS _srvx_probe; CREATE TABLE _srvx_probe (x int)"
