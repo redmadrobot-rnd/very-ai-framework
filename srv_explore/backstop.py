@@ -37,17 +37,15 @@ def _fs_readonly() -> bool | None:
 
 
 def _egress_locked() -> bool | None:
-    """True — прямое внешнее соединение блокирует ядро (IPAddressDeny → EPERM).
-    False — прошло (egress открыт). None — таймаут/неясно."""
+    """True — прямая внешка не проходит (firewall рубит: EPERM или молча дропает
+    пакеты → таймаут). False — коннект прошёл (egress открыт)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(1.5)
+    s.settimeout(3)
     try:
         s.connect(("1.1.1.1", 443))
         return False
-    except PermissionError:
-        return True
     except OSError:
-        return None
+        return True
     finally:
         s.close()
 

@@ -75,6 +75,9 @@ fi
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
 ensure_env_kv SRV_EXPLORE_PROFILE_STATE "$STATE_DIR/profiles.json"
 ensure_env_kv SRV_EXPLORE_PUBLIC_HOST "$(hostname -I 2>/dev/null | awk '{print $1}')"
+ensure_env_kv SRV_EXPLORE_PROXY "http://127.0.0.1:3128"
+ensure_env_kv SRV_EXPLORE_TRUSTED_DOMAINS ""
+ensure_env_kv SRV_EXPLORE_TRUSTED_CIDRS ""
 
 # 5c. админ-токен /admin — генерим ОДИН раз
 if ! grep -q "^SRV_EXPLORE_ADMIN_TOKEN=" "$CFG_DIR/env"; then
@@ -124,7 +127,7 @@ systemctl disable --now tinyproxy 2>/dev/null || true   # стоковый се�
 
 # allowlist доменов: api.anthropic.com (модель) + SRV_EXPLORE_TRUSTED_DOMAINS из env.
 # Каждый домен — extended-regex по хосту: сам домен и его поддомены.
-TRUSTED_DOMAINS="$(grep -E '^SRV_EXPLORE_TRUSTED_DOMAINS=' "$CFG_DIR/env" | cut -d= -f2- | tr ',' ' ')"
+TRUSTED_DOMAINS="$(grep -E '^SRV_EXPLORE_TRUSTED_DOMAINS=' "$CFG_DIR/env" | cut -d= -f2- | tr ',' ' ' || true)"
 {
   for d in api.anthropic.com $TRUSTED_DOMAINS; do
     [ -n "$d" ] || continue
