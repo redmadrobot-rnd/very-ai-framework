@@ -1,9 +1,11 @@
 name: Release — promote images & deploy prod
 
-# Триггер: тег v*.
-# Шаги: prepare (tag == HEAD main + пин каждого образа в digest по :<sha> последнего
-#        коммита main, менявшего сервис) → tests →
-# promote (digest → :vX) → deploy-prod. Откат — деплой предыдущего :vX (manual-deploy, build=off).
+# Триггер: тег v*. Тег может стоять на любом коммите main НЕ раньше текущего прода
+# (маркер refs/deploy/prod) — релиз двигает прод только вперёд.
+# Шаги: prepare (гейты: тег на main + монотонность; пин каждого образа в digest по :<sha>
+#        последнего коммита ≤ тега, менявшего сервис) → tests →
+# promote (digest → :vX, тег иммутабелен) → deploy-prod (re-check монотонности → deploy →
+# сдвиг refs/deploy/prod). Откат — деплой предыдущего :vX (manual-deploy, build=off).
 
 on:
   push:
@@ -28,16 +30,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Tag must point at current main HEAD
-        # Строгое равенство, а не is-ancestor: релиз выкатывает состояние HEAD.
-        # Тег на старом коммите промоутил бы не то состояние — запрещаем.
+      - name: Tag must be on main and not behind current prod
+        # Два гейта вместо «тег == HEAD main»:
+        # 1) тег на first-parent-истории main — пин образов ищет sha merge-коммитов,
+        #    тег на PR-ветке или на боковом коммите нашёл бы не те образы;
+        # 2) монотонность: тег — потомок последнего ЗАДЕПЛОЕННОГО прода (маркер
+        #    refs/deploy/prod, двигается в конце deploy-prod). Откат кода назад запрещён:
+        #    прод-БД видела миграции релизнутого кода, downgrade кода против новой схемы
+        #    ломается; сравниваем с маркером, а не с максимальным v-тегом — тег можно
+        #    перетегнуть руками, маркер двигает только успешный деплой.
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
-          HEAD_SHA=$(git rev-parse refs/remotes/origin/main)
-          [ "$GITHUB_SHA" = "$HEAD_SHA" ] || {
-            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на текущем HEAD main (${HEAD_SHA}). Тег должен стоять на HEAD. Перетегни актуальный main."
+          # grep без -q: ранний выход grep -q дал бы rev-list SIGPIPE → под pipefail
+          # пайплайн = 141 даже при успешном матче
+          git rev-list --first-parent refs/remotes/origin/main | grep -x "$GITHUB_SHA" >/dev/null || {
+            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на first-parent-истории main. Тег должен стоять на коммите main."
             exit 1
           }
+          if git fetch origin '+refs/deploy/prod:refs/deploy/prod' --quiet 2>/dev/null; then
+            git merge-base --is-ancestor refs/deploy/prod "$GITHUB_SHA" || {
+              PROD_SHA=$(git rev-parse refs/deploy/prod)
+              echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) старше текущего прода (${PROD_SHA}). Релиз двигает прод только вперёд; откат — manual-deploy предыдущего :vX (build=off)."
+              exit 1
+            }
+          else
+            echo "::notice::refs/deploy/prod не найден — первый релиз, монотонность не проверяем"
+          fi
 
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
@@ -105,11 +123,23 @@ jobs:
           DIGESTS: ${{ needs.prepare.outputs.digests }}
         # Не останавливаемся на первом упавшем сервисе (аналог fail-fast: false):
         # промоутим все, кого можем, и падаем в конце со списком проблемных.
+        # Версия иммутабельна: :vX уже существует с другим digest → это перетегнутый
+        # релиз, молча перезаписывать прод под тем же номером нельзя — падаем.
+        # Совпадающий digest — ре-ран этого же релиза, пропускаем (идемпотентность).
         run: |
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           failed=""
           for svc in $(jq -r 'keys[]' <<<"$DIGESTS"); do
             digest=$(jq -r --arg s "$svc" '.[$s]' <<<"$DIGESTS")
+            if existing=$(docker buildx imagetools inspect "$PREFIX/$svc:$REF" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+              if [ "$existing" = "$digest" ]; then
+                echo "skip $svc: :$REF уже указывает на $digest"
+                continue
+              fi
+              echo "::error::$svc:$REF уже выпущен с другим digest ($existing != $digest). Версия иммутабельна — возьми следующий номер."
+              failed="$failed $svc"
+              continue
+            fi
             echo "promote $svc: $digest -> :$REF"
             docker buildx imagetools create -t "$PREFIX/$svc:$REF" "$PREFIX/$svc@$digest" \
               || failed="$failed $svc"
@@ -123,7 +153,7 @@ jobs:
     timeout-minutes: 20
     environment: prod
     permissions:
-      contents: read
+      contents: write   # двигать маркер refs/deploy/prod после успешного деплоя
       packages: read
     concurrency:
       group: deploy-prod
@@ -142,6 +172,21 @@ jobs:
           [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Re-check — прод не уехал вперёд, пока шли тесты
+        # Гейт в prepare мог пройти до того, как ПАРАЛЛЕЛЬНЫЙ релиз задеплоился и сдвинул
+        # маркер (напр., его тесты закончились раньше). Повторяем чек под
+        # concurrency-замком deploy-prod — деплой поверх более нового релиза отсекается.
+        run: |
+          if git fetch origin '+refs/deploy/prod:refs/deploy/prod' --quiet 2>/dev/null; then
+            git merge-base --is-ancestor refs/deploy/prod "$GITHUB_SHA" || {
+              PROD_SHA=$(git rev-parse refs/deploy/prod)
+              echo "::error::пока шли тесты, прод уехал на ${PROD_SHA}, tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) теперь позади него. Деплой отменён."
+              exit 1
+            }
+          fi
 
       - name: Build .env (prod config)
         env:
@@ -177,3 +222,6 @@ jobs:
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/prod/.github/scripts/deploy.sh"
             prod "$DEPLOY_REPO" "$DEPLOY_TAG"
+
+      - name: Advance prod deploy marker
+        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
