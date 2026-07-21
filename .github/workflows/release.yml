@@ -139,8 +139,6 @@ jobs:
           done
           [ -z "$failed" ] || { echo "::error::promote упал для:$failed"; exit 1; }
 
-  # До деплоя (отставший маркер = дыра для даунгрейда); отдельный job — write-токен
-  # не попадает на прод-хост. Rationale: коммит 1bf4653.
   advance-marker:
     needs: promote
     runs-on: ubuntu-latest
