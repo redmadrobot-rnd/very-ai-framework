@@ -2,7 +2,7 @@ name: Release — promote images & deploy prod
 
 # Триггер: тег v* — любой коммит main не раньше текущего прода (refs/deploy/prod).
 # Шаги: prepare (гейты + пин образов в digest по :<sha>) → tests → promote (digest → :vX,
-# иммутабельно) → deploy-prod → advance-marker. Откат — manual-deploy предыдущего :vX (build=off).
+# иммутабельно) → advance-marker → deploy-prod. Откат — manual-deploy предыдущего :vX (build=off).
 
 on:
   push:
@@ -29,8 +29,8 @@ jobs:
 
       - name: Tag must be on main and not behind current prod
         # 1) тег на first-parent-истории main (пин образов ищет sha merge-коммитов);
-        # 2) тег — потомок задеплоенного прода (refs/deploy/prod): откат кода против
-        #    уже накаченных миграций запрещён. Сбой чтения маркера = fail closed.
+        # 2) тег — потомок последней релизной точки (refs/deploy/prod): откат кода
+        #    против уже накаченных миграций запрещён. Сбой чтения маркера = fail closed.
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
           # grep без -q: иначе SIGPIPE от rev-list под pipefail
@@ -139,8 +139,24 @@ jobs:
           done
           [ -z "$failed" ] || { echo "::error::promote упал для:$failed"; exit 1; }
 
+  # Маркер ДО деплоя, не после: упади push после деплоя — маркер отстал бы от прода и
+  # гейт пропустил бы даунгрейд. Упавший ПОСЛЕ сдвига деплой оставляет маркер впереди —
+  # безопасная сторона (частичный деплой мог прогнать миграции; откат — manual-deploy).
+  # Отдельный job: маркеру нужен contents: write, а GITHUB_TOKEN deploy-prod уходит на
+  # прод-хост — write-скоуп туда не утекает.
+  advance-marker:
+    needs: promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Advance prod release marker
+        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
+
   deploy-prod:
-    needs: [prepare, promote]
+    needs: [prepare, promote, advance-marker]
     if: ${{ needs.prepare.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -200,16 +216,3 @@ jobs:
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/prod/.github/scripts/deploy.sh"
             prod "$DEPLOY_REPO" "$DEPLOY_TAG"
-
-  # Отдельный job: маркеру нужен contents: write, а GITHUB_TOKEN deploy-prod
-  # уходит на прод-хост — write-скоуп туда не утекает.
-  advance-marker:
-    needs: deploy-prod
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Advance prod deploy marker
-        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
