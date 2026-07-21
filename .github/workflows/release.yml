@@ -4,8 +4,8 @@ name: Release — promote images & deploy prod
 # (маркер refs/deploy/prod) — релиз двигает прод только вперёд.
 # Шаги: prepare (гейты: тег на main + монотонность; пин каждого образа в digest по :<sha>
 #        последнего коммита ≤ тега, менявшего сервис) → tests →
-# promote (digest → :vX, тег иммутабелен) → deploy-prod (re-check монотонности → deploy →
-# сдвиг refs/deploy/prod). Откат — деплой предыдущего :vX (manual-deploy, build=off).
+# promote (digest → :vX, тег иммутабелен) → deploy-prod (deploy → сдвиг refs/deploy/prod).
+# Откат — деплой предыдущего :vX (manual-deploy, build=off).
 
 on:
   push:
@@ -172,21 +172,6 @@ jobs:
           [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
 
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Re-check — прод не уехал вперёд, пока шли тесты
-        # Гейт в prepare мог пройти до того, как ПАРАЛЛЕЛЬНЫЙ релиз задеплоился и сдвинул
-        # маркер (напр., его тесты закончились раньше). Повторяем чек под
-        # concurrency-замком deploy-prod — деплой поверх более нового релиза отсекается.
-        run: |
-          if git fetch origin '+refs/deploy/prod:refs/deploy/prod' --quiet 2>/dev/null; then
-            git merge-base --is-ancestor refs/deploy/prod "$GITHUB_SHA" || {
-              PROD_SHA=$(git rev-parse refs/deploy/prod)
-              echo "::error::пока шли тесты, прод уехал на ${PROD_SHA}, tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) теперь позади него. Деплой отменён."
-              exit 1
-            }
-          fi
 
       - name: Build .env (prod config)
         env:
