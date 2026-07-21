@@ -9,6 +9,11 @@ on:
     tags:
       - "v*"
 
+# Релизы строго по одному: параллельный ран прошёл бы гейт по старому маркеру
+concurrency:
+  group: release-prod
+  cancel-in-progress: false
+
 env:
   SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
 
