@@ -1,14 +1,18 @@
 name: Release — promote images & deploy prod
 
-# Триггер: тег v*.
-# Шаги: prepare (tag == HEAD main + пин каждого образа в digest по :<sha> последнего
-#        коммита main, менявшего сервис) → tests →
-# promote (digest → :vX) → deploy-prod. Откат — деплой предыдущего :vX (manual-deploy, build=off).
+# Триггер: тег v* — любой коммит main не раньше текущего прода (refs/deploy/prod).
+# Шаги: prepare (гейты + пин образов в digest по :<sha>) → tests → promote (digest → :vX,
+# иммутабельно) → advance-marker → deploy-prod. Откат — manual-deploy предыдущего :vX (build=off).
 
 on:
   push:
     tags:
       - "v*"
+
+# Релизы строго по одному: параллельный ран прошёл бы гейт по старому маркеру
+concurrency:
+  group: release-prod
+  cancel-in-progress: false
 
 env:
   SERVICES_DIR: ${{ vars.SERVICES_DIR || 'services' }}
@@ -28,16 +32,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Tag must point at current main HEAD
-        # Строгое равенство, а не is-ancestor: релиз выкатывает состояние HEAD.
-        # Тег на старом коммите промоутил бы не то состояние — запрещаем.
+      - name: Tag must be on main and not behind current prod
+        # 1) тег на first-parent-истории main (пин образов ищет sha merge-коммитов);
+        # 2) тег — потомок последней релизной точки (refs/deploy/prod): откат кода
+        #    против уже накаченных миграций запрещён. Сбой чтения маркера = fail closed.
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
-          HEAD_SHA=$(git rev-parse refs/remotes/origin/main)
-          [ "$GITHUB_SHA" = "$HEAD_SHA" ] || {
-            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на текущем HEAD main (${HEAD_SHA}). Тег должен стоять на HEAD. Перетегни актуальный main."
+          # grep без -q: иначе SIGPIPE от rev-list под pipefail
+          git rev-list --first-parent refs/remotes/origin/main | grep -x "$GITHUB_SHA" >/dev/null || {
+            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на first-parent-истории main. Тег должен стоять на коммите main."
             exit 1
           }
+          # ls-remote --exit-code: rc=2 — маркера нет (первый релиз), прочие ошибки — стоп
+          if MARKER=$(git ls-remote --exit-code origin refs/deploy/prod); then
+            PROD_SHA=${MARKER%%$'\t'*}
+            git merge-base --is-ancestor "$PROD_SHA" "$GITHUB_SHA" || {
+              echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) старше текущего прода (${PROD_SHA}). Релиз двигает прод только вперёд; откат — manual-deploy предыдущего :vX (build=off)."
+              exit 1
+            }
+          elif [ $? -eq 2 ]; then
+            echo "::notice::refs/deploy/prod не найден — первый релиз, монотонность не проверяем"
+          else
+            echo "::error::не удалось прочитать refs/deploy/prod (сеть/права) — guard не скипаем, fail closed"
+            exit 1
+          fi
 
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
@@ -105,19 +123,40 @@ jobs:
           DIGESTS: ${{ needs.prepare.outputs.digests }}
         # Не останавливаемся на первом упавшем сервисе (аналог fail-fast: false):
         # промоутим все, кого можем, и падаем в конце со списком проблемных.
+        # :vX иммутабелен: другой digest — fail, тот же — skip (идемпотентный ре-ран).
         run: |
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           failed=""
           for svc in $(jq -r 'keys[]' <<<"$DIGESTS"); do
             digest=$(jq -r --arg s "$svc" '.[$s]' <<<"$DIGESTS")
+            if existing=$(docker buildx imagetools inspect "$PREFIX/$svc:$REF" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+              if [ "$existing" = "$digest" ]; then
+                echo "skip $svc: :$REF уже указывает на $digest"
+                continue
+              fi
+              echo "::error::$svc:$REF уже выпущен с другим digest ($existing != $digest). Версия иммутабельна — возьми следующий номер."
+              failed="$failed $svc"
+              continue
+            fi
             echo "promote $svc: $digest -> :$REF"
             docker buildx imagetools create -t "$PREFIX/$svc:$REF" "$PREFIX/$svc@$digest" \
               || failed="$failed $svc"
           done
           [ -z "$failed" ] || { echo "::error::promote упал для:$failed"; exit 1; }
 
+  advance-marker:
+    needs: promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Advance prod release marker
+        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
+
   deploy-prod:
-    needs: [prepare, promote]
+    needs: [prepare, promote, advance-marker]
     if: ${{ needs.prepare.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
