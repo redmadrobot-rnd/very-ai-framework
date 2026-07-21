@@ -4,8 +4,8 @@ name: Release — promote images & deploy prod
 # (маркер refs/deploy/prod) — релиз двигает прод только вперёд.
 # Шаги: prepare (гейты: тег на main + монотонность; пин каждого образа в digest по :<sha>
 #        последнего коммита ≤ тега, менявшего сервис) → tests →
-# promote (digest → :vX, тег иммутабелен) → deploy-prod (deploy → сдвиг refs/deploy/prod).
-# Откат — деплой предыдущего :vX (manual-deploy, build=off).
+# promote (digest → :vX, тег иммутабелен) → deploy-prod → advance-marker (сдвиг
+# refs/deploy/prod). Откат — деплой предыдущего :vX (manual-deploy, build=off).
 
 on:
   push:
@@ -47,14 +47,21 @@ jobs:
             echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на first-parent-истории main. Тег должен стоять на коммите main."
             exit 1
           }
-          if git fetch origin '+refs/deploy/prod:refs/deploy/prod' --quiet 2>/dev/null; then
-            git merge-base --is-ancestor refs/deploy/prod "$GITHUB_SHA" || {
-              PROD_SHA=$(git rev-parse refs/deploy/prod)
+          # ls-remote --exit-code: rc=2 — маркера нет (первый релиз), rc=0 — есть,
+          # прочее — ошибка сети/прав. Guard безопасности обязан fail closed: молча
+          # скипнуть проверку из-за сбоя fetch нельзя.
+          if MARKER=$(git ls-remote --exit-code origin refs/deploy/prod); then
+            PROD_SHA=${MARKER%%$'\t'*}
+            # коммит маркера — коммит main, уже в локальной истории (fetch-depth: 0)
+            git merge-base --is-ancestor "$PROD_SHA" "$GITHUB_SHA" || {
               echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) старше текущего прода (${PROD_SHA}). Релиз двигает прод только вперёд; откат — manual-deploy предыдущего :vX (build=off)."
               exit 1
             }
-          else
+          elif [ $? -eq 2 ]; then
             echo "::notice::refs/deploy/prod не найден — первый релиз, монотонность не проверяем"
+          else
+            echo "::error::не удалось прочитать refs/deploy/prod (сеть/права) — guard не скипаем, fail closed"
+            exit 1
           fi
 
       - id: s
@@ -153,7 +160,7 @@ jobs:
     timeout-minutes: 20
     environment: prod
     permissions:
-      contents: write   # двигать маркер refs/deploy/prod после успешного деплоя
+      contents: read
       packages: read
     concurrency:
       group: deploy-prod
@@ -208,5 +215,16 @@ jobs:
             bash "/srv/deploy/$DEPLOY_PROJECT/prod/.github/scripts/deploy.sh"
             prod "$DEPLOY_REPO" "$DEPLOY_TAG"
 
+  # Отдельный job, а не шаг deploy-prod: маркеру нужен contents: write, а deploy-prod
+  # передаёт свой GITHUB_TOKEN на прод-хост (docker login) — write-скоуп туда утекать
+  # не должен.
+  advance-marker:
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
       - name: Advance prod deploy marker
         run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
