@@ -1,0 +1,6 @@
+# Рантайм server-side srv-explore (ставится в venv на хосте install.sh'ом).
+# Версии MCP пиним < 2: используем FastMCP + streamable_http_app (v2 переименовал API).
+claude-agent-sdk>=0.2,<0.3
+mcp>=1.12,<2
+starlette>=0.37
+uvicorn>=0.30

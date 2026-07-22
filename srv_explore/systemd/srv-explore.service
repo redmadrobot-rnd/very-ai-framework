@@ -1,0 +1,20 @@
+[Unit]
+Description=srv-explore — readonly server explorer (remote MCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Сервис привилегированный (root): провижинит (apt/docker) и спавнит агента в
+# ПЕСОЧНИЦЕ (systemd-run --uid=srvx-agent + ProtectSystem=strict). Опасный код —
+# bash агента — заперт там, не здесь. Read-only гарантия — на песочнице агента.
+User=root
+EnvironmentFile=/etc/srv-explore/env
+WorkingDirectory=/opt/srv-explore
+ExecStart=/opt/srv-explore/venv/bin/python -m srv_explore.mcp_server
+Restart=on-failure
+RestartSec=5
+StateDirectory=srv-explore
+
+[Install]
+WantedBy=multi-user.target

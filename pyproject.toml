@@ -1,13 +1,14 @@
 [tool.ruff]
 # Вендоренный CLI фреймворка (gitmark) — это инструмент, а не исходники проекта;
 # не гоняем по нему линтер в адаптирующемся репо.
-extend-exclude = [".claude/skills"]
+extend-exclude = [".claude/skills", "srv_explore/guard.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "--strict-markers --import-mode=importlib"
 markers = [
     "heavy: slow/expensive tests (e2e, load, big fixtures) — skipped on feature push, run at PR",

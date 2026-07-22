@@ -1,0 +1,63 @@
+name: Deploy srv-explore (host service)
+
+# srv-explore ставится НА ХОСТ (systemd) для доступа к системам сервера.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Куда деплоим srv-explore
+        type: environment
+        required: true
+        default: dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Preflight — конфиг окружения задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          # Агент = claude CLI внутри Agent SDK → авторизуется CLAUDE_CODE_OAUTH_TOKEN.
+          [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || miss="$miss CLAUDE_CODE_OAUTH_TOKEN"
+          [ -z "$miss" ] || { echo "::error::нет конфига:$miss (Environment/repo → Variables/Secrets)"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Copy srv-explore sources to host
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "srv_explore/**"
+          target: "/srv/deploy/${{ github.event.repository.name }}/srv-explore"
+
+      - name: Install + inject model auth + restart
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
+        env:
+          SRV_EXPLORE_ENV: ${{ inputs.environment }}
+          REPO_DIR: /srv/deploy/${{ github.event.repository.name }}/srv-explore
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: SRV_EXPLORE_ENV,REPO_DIR,CLAUDE_CODE_OAUTH_TOKEN
+          script: |
+            set -euo pipefail
+            SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+            $SUDO env SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh"
+            $SUDO sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/srv-explore/env
+            printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" | $SUDO tee -a /etc/srv-explore/env >/dev/null
+            $SUDO systemctl restart srv-explore.service
+            $SUDO systemctl is-active srv-explore.service
