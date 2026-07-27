@@ -18,7 +18,6 @@ import contextvars
 import json
 import os
 import secrets
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,23 +106,44 @@ def security_probe() -> dict:
         return {}
 
 
-async def run_agent(task: str) -> tuple[str, list]:
-    """Прогнать задачу readonly-агентом В ПЕСОЧНИЦЕ; вернуть (отчёт, команды сессии)."""
+async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
+    """Прогнать задачу readonly-агентом В ПЕСОЧНИЦЕ; вернуть (отчёт, команды сессии).
+
+    Воркер шлёт события построчно: шаги попадают в `steps` по ходу прогона (видно в
+    админке), поэтому при обрыве по таймауту собранное не теряется.
+    """
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
-    env.update(profile_store.provisioned())  # DOCKER_HOST на socket-proxy, *_DSN
+    env.update(profile_store.active_creds())  # только установленные и включённые
     worker = [sys.executable, "-m", "srv_explore.agent_worker"]
+    if steps is None:
+        steps = []
+    final: dict = {}
+
+    def on_line(line: str):
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            return
+        if ev.get("type") == "step":
+            steps.append({k: ev.get(k) for k in ("cmd", "ok", "reason")})
+        elif ev.get("type") == "result":
+            final.update(ev)
 
     def spawn():
-        return sandbox.run(worker, input_text=task, extra_env=env)
+        return sandbox.run(worker, input_text=task, extra_env=env, on_line=on_line)
 
     rc, out, err = await asyncio.to_thread(spawn)
+    if "result" in final:
+        return final["result"], steps
+    tail = (err or out).strip()[:600]
     if rc != 0:
-        return f"[agent error] {(err or out).strip()[:800]}", []
-    try:
-        data = json.loads(out)
-    except ValueError:
-        return f"[agent output parse error] {out.strip()[:800]}", []
-    return data.get("result", ""), data.get("steps", [])
+        limit = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", sandbox.MAX_SEC)
+        return (
+            f"[agent прерван, код {rc}; лимит прогона {limit}s] "
+            f"собрано команд: {len(steps)}. {tail}",
+            steps,
+        )
+    return f"[agent не вернул результат] {tail}", steps
 
 
 # --- реестр задач (job-id + poll) --------------------------------------------
@@ -157,7 +177,8 @@ class JobRegistry:
         async def runner():
             job = self._jobs.get(job_id)
             try:
-                result, steps = await coro_factory()
+                # тот же список, что лежит в job: шаги видны по ходу прогона
+                result, steps = await coro_factory(job["steps"] if job else None)
                 if job:
                     job.update(
                         status="done", result=result, steps=steps, finished=_now()
@@ -201,7 +222,9 @@ def build_app(store: TokenStore | None = None):
         """Запустить readonly-разведку по задаче. Вернёт job_id (поллить status)."""
         rec = CURRENT_TOKEN.get()
         label = rec.label if rec else "?"
-        job_id = jobs.start(task, label=label, coro_factory=lambda: run_agent(task))
+        job_id = jobs.start(
+            task, label=label, coro_factory=lambda steps: run_agent(task, steps)
+        )
         return json.dumps({"job_id": job_id, "status": "running"}, ensure_ascii=False)
 
     @mcp.tool()
@@ -282,7 +305,9 @@ def build_app(store: TokenStore | None = None):
         task = (body.get("task") or "").strip()
         if not task:
             return JSONResponse({"error": "task обязателен"}, status_code=400)
-        job_id = jobs.start(task, label="admin", coro_factory=lambda: run_agent(task))
+        job_id = jobs.start(
+            task, label="admin", coro_factory=lambda steps: run_agent(task, steps)
+        )
         return JSONResponse({"job_id": job_id})
 
     async def admin_ask_status(request):
@@ -295,32 +320,24 @@ def build_app(store: TokenStore | None = None):
         return JSONResponse(job)
 
     def _profiles_payload():
-        """Читает СОХРАНЁННЫЙ вердикт (health.json) — без живых проб на каждый показ."""
-        state = profile_store.load()
-        stored = profile_store.health_all()
+        """Сохранённое состояние: установлен (+чеклист) и включён. Живых проб нет."""
+        enabled = profile_store.load()
+        installed = profile_store.installed_all()
         out = []
         for n, d in profile_store.registry().items():
-            h = stored.get(n, {}) if state[n] else {}
+            rec = installed.get(n, {})
             out.append(
                 {
                     "name": n,
                     "desc": d,
-                    "enabled": state[n],
-                    "ready": provision.ready(
-                        n
-                    ),  # False → включать нельзя (нет драйвера)
-                    "health": h.get("state", "off" if not state[n] else "unknown"),
-                    "detail": h.get("detail", ""),
+                    "needs_dsn": provision.needs_admin_dsn(n),
+                    "installed": bool(rec.get("ok")),
+                    "enabled": enabled[n],
+                    "checklist": rec.get("checklist", []),
+                    "at": rec.get("at", ""),
                 }
             )
         return JSONResponse({"profiles": out})
-
-    async def _probe_and_store(name: str):
-        try:
-            verdict = await asyncio.to_thread(provision.probe, name)
-        except Exception:  # noqa: BLE001 — проба не должна ронять запрос
-            verdict = {"state": "error", "detail": "проба упала"}
-        profile_store.health_set(name, verdict)
 
     async def admin_profiles(request):
         denied = _require_admin(request)
@@ -329,51 +346,29 @@ def build_app(store: TokenStore | None = None):
         if request.method == "POST":
             body = await request.json()
             name = body.get("name", "")
-            enabled = bool(body.get("enabled"))
+            action = body.get("action", "")
             admin_dsn = (body.get("admin_dsn") or "").strip()
             if name not in profile_store.registry():
-                return JSONResponse({"error": "неизвестный профиль"}, status_code=404)
-            mod = profile_store.modules().get(name)
-            is_db = provision.is_db_profile(name)  # креды нужны и это не proxy-профиль
-            async with prov_lock:  # никаких параллельных провижинов
+                return JSONResponse({"error": "неизвестный плагин"}, status_code=404)
+            async with prov_lock:  # установка/переключение строго последовательны
                 try:
-                    if body.get("recheck"):  # перепроверка вручную, без переключения
-                        await _probe_and_store(name)
-                    elif not enabled:
-                        keys = await asyncio.to_thread(provision.down, name)
-                        profile_store.drop_provisioned(keys)
-                        profile_store.set_enabled(name, False)
-                        profile_store.health_drop(name)
-                    elif is_db:
-                        if not provision.has_driver(name):
+                    if action == "install":
+                        if provision.needs_admin_dsn(name) and not admin_dsn:
+                            return JSONResponse({"need_dsn": True, "name": name})
+                        await asyncio.to_thread(provision.install, name, admin_dsn)
+                    elif action == "uninstall":
+                        await asyncio.to_thread(provision.uninstall, name)
+                    elif action in ("on", "off"):
+                        if action == "on" and not profile_store.is_installed(name):
                             return JSONResponse(
-                                {"error": "драйвер профиля ещё не готов"},
-                                status_code=400,
+                                {"error": "плагин не установлен"}, status_code=400
                             )
-                        await asyncio.to_thread(provision.install, name)
-                        ce = getattr(mod, "CREDS_ENV", None)
-                        # уже настроено (ro-DSN выдан) → не спрашиваем DSN снова
-                        if not (ce and profile_store.provisioned().get(ce)):
-                            if not admin_dsn:  # DSN — обязательное условие включения БД
-                                return JSONResponse({"need_dsn": True, "name": name})
-                            ro = await asyncio.to_thread(
-                                provision.create_role, name, admin_dsn
-                            )
-                            profile_store.add_provisioned({ce: ro})
-                        profile_store.set_enabled(name, True)
-                        await _probe_and_store(name)  # вердикт снимаем ОДИН раз тут
+                        profile_store.set_enabled(name, action == "on")
                     else:
-                        env = await asyncio.to_thread(provision.enable, name)
-                        if env:
-                            profile_store.add_provisioned(env)
-                        profile_store.set_enabled(name, True)
-                        await _probe_and_store(name)
-                except (
-                    subprocess.CalledProcessError,
-                    OSError,
-                    KeyError,
-                    RuntimeError,
-                ) as e:
+                        return JSONResponse(
+                            {"error": "неизвестное действие"}, status_code=400
+                        )
+                except (OSError, KeyError, RuntimeError) as e:
                     return JSONResponse({"error": f"provision: {e}"}, status_code=500)
         return _profiles_payload()
 

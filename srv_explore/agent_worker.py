@@ -23,6 +23,12 @@ def _prompt() -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+def _emit(event: dict) -> None:
+    """Событие родителю построчно — чтобы шаги были видны по ходу, а не только в конце
+    (и уцелели, если прогон прибьёт по RuntimeMaxSec)."""
+    print(json.dumps(event, ensure_ascii=False), flush=True)
+
+
 def _hook(steps):
     async def pretooluse(input_data, tool_use_id, context):  # noqa: ARG001 (сигнатура SDK)
         if input_data.get("tool_name") != "Bash":
@@ -32,7 +38,9 @@ def _hook(steps):
             ok, reason = guard.check_command_string(cmd)
         else:
             ok, reason = False, "пустая команда"
-        steps.append({"cmd": cmd, "ok": ok, "reason": "" if ok else reason})
+        rec = {"cmd": cmd, "ok": ok, "reason": "" if ok else reason}
+        steps.append(rec)
+        _emit({"type": "step", **rec})
         if ok:
             return {}
         return {
@@ -79,9 +87,10 @@ async def _run(task: str) -> dict:
 def main() -> int:
     task = sys.stdin.read().strip()
     if not task:
-        print(json.dumps({"result": "", "steps": [], "error": "empty task"}))
+        _emit({"type": "result", "result": "", "error": "empty task"})
         return 1
-    print(json.dumps(asyncio.run(_run(task)), ensure_ascii=False))
+    data = asyncio.run(_run(task))
+    _emit({"type": "result", "result": data.get("result", "")})
     return 0
 
 

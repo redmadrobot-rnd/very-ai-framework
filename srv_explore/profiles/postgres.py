@@ -1,17 +1,22 @@
-"""Профиль postgres — конфиг подготовки, НЕ парсер команд.
-Режим Б: сервис по admin-DSN создаёт read-only роль и выдаёт агенту её DSN.
-"""
+"""Плагин postgres: из одноразового admin-DSN заводит read-only роль для агента."""
+
+from srv_explore.plugin_api import (
+    dsn_db,
+    dsn_host,
+    dsn_user,
+    dsn_with_creds,
+    step,
+    tcp_open,
+)
 
 ID = "postgres"
 DESC = "PostgreSQL — read-only роль"
-KIND = "postgres"  # драйвер провизионера (как гонять SQL, как строить DSN)
-COMMANDS = ["psql"]
+NEEDS_ADMIN_DSN = True
 PACKAGES = ["postgresql-client"]
-CREDS_ENV = "PG_INSPECTOR_DSN"  # ro-DSN, который получит агент
-RO_ROLE = "srvx_readonly"  # фиксированное имя — повторный enable не плодит сирот
+CREDS_ENV = "PG_INSPECTOR_DSN"
+RO_ROLE = "srvx_readonly"  # фиксированное имя — повторный Install не плодит юзеров
 
-# SETUP гоняется под admin-DSN. {role}/{pw}/{db} подставляет провизионер.
-# Идемпотентно: роль есть — сменить пароль, нет — создать. pg_read_all_data = read.
+# Идемпотентно: роль есть — ротировать пароль, нет — создать. pg_read_all_data = чтение.
 SETUP = (
     "DO $$ BEGIN "
     "IF EXISTS (SELECT FROM pg_roles WHERE rolname='{role}') "
@@ -20,6 +25,57 @@ SETUP = (
     'GRANT CONNECT ON DATABASE "{db}" TO {role}; '
     "GRANT pg_read_all_data TO {role};"
 )
-# Проба барьера под ro-DSN: должна упасть permission denied (иначе роль не read-only).
-# Ведущий DROP делает пробу идемпотентной: остаток от broken не даёт ложный «отбито».
-VERIFY = "DROP TABLE IF EXISTS _srvx_probe; CREATE TABLE _srvx_probe (x int)"
+PROBE_WRITE = "DROP TABLE IF EXISTS _srvx_probe; CREATE TABLE _srvx_probe (x int)"
+
+
+def _env(dsn: str) -> dict:
+    """Креды — через PG*-переменные, не через argv (пароль не светится в ps)."""
+    host, port = dsn_host(dsn)
+    user, pw = dsn_user(dsn)
+    env = {"PGCONNECT_TIMEOUT": "10"}
+    if host:
+        env["PGHOST"] = host
+    if port:
+        env["PGPORT"] = str(port)
+    if user:
+        env["PGUSER"] = user
+    if pw:
+        env["PGPASSWORD"] = pw
+    db = dsn_db(dsn)
+    if db:
+        env["PGDATABASE"] = db
+    return env
+
+
+def _psql(ctx, dsn: str, sql: str):
+    return ctx.sh(["psql", "-v", "ON_ERROR_STOP=1", "-tAc", sql], env=_env(dsn))
+
+
+def install(ctx):
+    ok, detail = ctx.apt(PACKAGES)
+    yield step("клиент psql", ok and ctx.which("psql"), detail)
+
+    host, port = dsn_host(ctx.admin_dsn)
+    yield step("БД обнаружена", tcp_open(host, port or 5432), f"{host}:{port or 5432}")
+
+    rc, _, err = _psql(ctx, ctx.admin_dsn, "SELECT 1")
+    yield step("админ-доступ", rc == 0, err.strip()[:160] or "SELECT 1 ok")
+
+    pw = ctx.password()
+    sql = SETUP.format(role=RO_ROLE, pw=pw, db=dsn_db(ctx.admin_dsn))
+    rc, _, err = _psql(ctx, ctx.admin_dsn, sql)
+    yield step("RO-роль создана", rc == 0, err.strip()[:160] or RO_ROLE)
+
+    ro_dsn = dsn_with_creds(ctx.admin_dsn, RO_ROLE, pw)
+    rc, _, err = _psql(ctx, ro_dsn, "SELECT 1")
+    yield step("RO читает", rc == 0, err.strip()[:160] or "SELECT 1 ok")
+
+    rc, _, err = _psql(ctx, ro_dsn, PROBE_WRITE)
+    denied = rc != 0 and "denied" in err.lower()
+    yield step(
+        "запись отбита",
+        denied,
+        "CREATE TABLE → permission denied" if denied else "ЗАПИСЬ ПРОШЛА — роль не RO",
+    )
+
+    ctx.creds = {CREDS_ENV: ro_dsn}

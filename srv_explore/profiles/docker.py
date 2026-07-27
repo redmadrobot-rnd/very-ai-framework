@@ -1,27 +1,83 @@
-"""Профиль docker — конфиг подготовки, НЕ парсер команд.
-Read-only держит docker-socket-proxy: клиент бьёт в прокси, не в реальный сокет.
+"""Плагин docker: read-only Docker API через socket-proxy.
+
+Реальный сокет агенту недоступен (он вне группы docker) — ходит только в прокси,
+где мутации (POST) выключены.
 """
+
+import time
+
+from srv_explore.plugin_api import step
 
 ID = "docker"
 DESC = "Docker — read-only через socket-proxy"
-COMMANDS = ["docker", "docker-compose"]
-PACKAGES = []  # docker CLI уже на docker-хосте; ставить нечего
-CREDS_ENV = "DOCKER_HOST"  # провизионер укажет на прокси
+NEEDS_ADMIN_DSN = False
 
-# Прокси перед /var/run/docker.sock: read-эндпоинты on, мутации (POST) off.
-# Агент ходит в него по DOCKER_HOST, к реальному сокету доступа нет.
-PROXY = {
-    "image": "tecnativa/docker-socket-proxy:latest",
-    "port": "127.0.0.1:2375:2375",
-    "env": {
-        "CONTAINERS": "1",
-        "IMAGES": "1",
-        "NETWORKS": "1",
-        "VOLUMES": "1",
-        "INFO": "1",
-        "PING": "1",
-        "VERSION": "1",
-        "POST": "0",
-    },
-    "sets": {"DOCKER_HOST": "tcp://127.0.0.1:2375"},
+CONTAINER = "srvx-docker-proxy"
+IMAGE = "tecnativa/docker-socket-proxy:latest"
+BIND = "127.0.0.1:2375:2375"
+DOCKER_HOST = "tcp://127.0.0.1:2375"
+# read-эндпоинты on, любые мутации off
+PROXY_ENV = {
+    "CONTAINERS": "1",
+    "IMAGES": "1",
+    "NETWORKS": "1",
+    "VOLUMES": "1",
+    "INFO": "1",
+    "PING": "1",
+    "VERSION": "1",
+    "POST": "0",
 }
+
+
+def install(ctx):
+    yield step("клиент docker", ctx.which("docker"), "docker CLI на хосте")
+
+    rc, _, _ = ctx.sh(["docker", "info", "--format", "{{.ServerVersion}}"])
+    yield step("демон обнаружен", rc == 0, "docker.sock отвечает")
+
+    ctx.sh(["docker", "rm", "-f", CONTAINER])
+    envs = []
+    for k, v in PROXY_ENV.items():
+        envs += ["-e", f"{k}={v}"]
+    rc, _, err = ctx.sh(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--restart",
+            "unless-stopped",
+            "--name",
+            CONTAINER,
+            "-p",
+            BIND,
+            "-v",
+            "/var/run/docker.sock:/var/run/docker.sock:ro",
+            *envs,
+            IMAGE,
+        ],
+        timeout=180,
+    )
+    yield step("socket-proxy поднят", rc == 0, err.strip()[:160] or BIND)
+
+    probe_env = {"DOCKER_HOST": DOCKER_HOST}
+    rc = 1
+    for _ in range(20):  # контейнер поднимается не мгновенно
+        rc, _, _ = ctx.sh(
+            ["docker", "version", "--format", "{{.Server.Version}}"], env=probe_env
+        )
+        if rc == 0:
+            break
+        time.sleep(0.5)
+    yield step("чтение работает", rc == 0, "docker version через прокси")
+
+    probe = "srvx-install-probe"
+    rc, _, _ = ctx.sh(["docker", "network", "create", probe], env=probe_env)
+    if rc == 0:  # мутация прошла — прокси НЕ read-only
+        ctx.sh(["docker", "network", "rm", probe], env=probe_env)
+    yield step("запись отбита", rc != 0, "мутирующий вызов → 403")
+
+    ctx.creds = {"DOCKER_HOST": DOCKER_HOST}
+
+
+def uninstall(ctx):
+    ctx.sh(["docker", "rm", "-f", CONTAINER])

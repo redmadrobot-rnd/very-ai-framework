@@ -13,10 +13,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 AGENT_USER = os.environ.get("SRV_EXPLORE_AGENT_USER", "srvx-agent")
-MAX_SEC = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", "300")  # анти-подвисание
+MAX_SEC = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", "600")  # анти-подвисание
 PROXY = os.environ.get("SRV_EXPLORE_PROXY", "http://127.0.0.1:3128")
 # каталог-родитель пакета srv_explore — чтобы `python -m srv_explore.*` в песочнице
 # нашёл пакет независимо от cwd (RO-FS читать не мешает).
@@ -62,8 +63,18 @@ def available() -> bool:
     return shutil.which("systemd-run") is not None and os.geteuid() == 0
 
 
-def run(args, input_text: str | None = None, extra_env: dict | None = None):
-    """Запустить args в песочнице. Вернуть (returncode, stdout, stderr)."""
+def run(
+    args,
+    input_text: str | None = None,
+    extra_env: dict | None = None,
+    on_line=None,
+):
+    """Запустить args в песочнице. Вернуть (returncode, stdout, stderr).
+
+    on_line — колбэк на каждую строку stdout по мере её появления: так родитель видит
+    ход прогона, а не только финал (и сохраняет собранное, если песочницу прибьёт
+    по RuntimeMaxSec).
+    """
     env = {"HOME": "/tmp", "PYTHONPATH": _PKG_PARENT, **_PROXY_ENV, **(extra_env or {})}
     cmd = [
         "systemd-run",
@@ -79,5 +90,28 @@ def run(args, input_text: str | None = None, extra_env: dict | None = None):
     for k, v in env.items():
         cmd += [f"--setenv={k}={v}"]
     cmd += list(args)
-    p = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
-    return p.returncode, p.stdout, p.stderr
+
+    if on_line is None:
+        p = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
+        return p.returncode, p.stdout, p.stderr
+
+    # stderr — во временный файл: иначе чтение одного пайпа может залипнуть на другом
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as errf:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errf,
+            text=True,
+        )
+        if input_text is not None:
+            proc.stdin.write(input_text)
+        proc.stdin.close()
+        out: list[str] = []
+        for line in proc.stdout:
+            out.append(line)
+            on_line(line)
+        proc.stdout.close()
+        rc = proc.wait()
+        errf.seek(0)
+        return rc, "".join(out), errf.read()

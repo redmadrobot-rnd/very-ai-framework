@@ -1,7 +1,11 @@
-"""Профили = тонкие конфиги (profiles/*.py) + тумблеры в profiles.json (StateDir).
+"""Состояние плагинов в StateDir. Три независимые вещи:
 
-Реестр (id + описание) сканится из модулей — не зашит. Профиль default-OFF: включается
-в админке. Гард профили не грузит; их читают админка и провизионер.
+- `profiles.json`  — тумблер On/Off (выдавать креды агенту или нет), default-OFF;
+- `installed.json` — факт установки + чеклист последнего Install;
+- `creds.json`     — что плагин выдал агенту (ro-DSN, DOCKER_HOST), по плагинам.
+
+Агент получает креды ТОЛЬКО установленных и включённых плагинов (`active_creds`).
+Реестр плагинов сканится из profiles/*.py — имена нигде не зашиты.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -47,7 +52,7 @@ def modules() -> dict:
 
 
 def registry() -> dict[str, str]:
-    """{id: desc} из профилей-конфигов — список для админки."""
+    """{id: desc} — список плагинов для админки."""
     return {pid: getattr(mod, "DESC", "") for pid, mod in modules().items()}
 
 
@@ -55,11 +60,24 @@ def store_path() -> Path:
     return Path(STATE)
 
 
-def load() -> dict[str, bool]:
+def _read(path: Path, default):
     try:
-        data = json.loads(store_path().read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        data = {}
+        return default
+
+
+def _write(path: Path, data) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+# --- тумблер On/Off -------------------------------------------------------------
+
+
+def load() -> dict[str, bool]:
+    data = _read(store_path(), {})
     return {pid: bool(data.get(pid, False)) for pid in registry()}
 
 
@@ -68,75 +86,70 @@ def set_enabled(name: str, enabled: bool) -> dict[str, bool]:
         raise KeyError(name)
     state = load()
     state[name] = enabled
-    path = store_path()
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    _write(store_path(), state)
     return state
 
 
-# --- provisioned env: что провизионер выдал агенту (DOCKER_HOST, *_DSN) ----------
+# --- установка + чеклист --------------------------------------------------------
 
 
-def _prov_path() -> Path:
-    return store_path().with_name("provisioned.json")
+def _installed_path() -> Path:
+    return store_path().with_name("installed.json")
 
 
-def provisioned() -> dict[str, str]:
-    try:
-        return json.loads(_prov_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+def installed_all() -> dict[str, dict]:
+    return _read(_installed_path(), {})
 
 
-def _write_prov(env: dict[str, str]) -> None:
-    p = _prov_path()
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(env, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, p)
+def set_checklist(pid: str, checklist: list[dict], ok: bool) -> None:
+    data = installed_all()
+    data[pid] = {
+        "ok": ok,
+        "checklist": checklist,
+        "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    _write(_installed_path(), data)
 
 
-def add_provisioned(env: dict[str, str]) -> None:
-    cur = provisioned()
-    cur.update(env)
-    _write_prov(cur)
+def drop_checklist(pid: str) -> None:
+    data = installed_all()
+    if data.pop(pid, None) is not None:
+        _write(_installed_path(), data)
 
 
-def drop_provisioned(keys) -> None:
-    cur = provisioned()
-    for k in keys:
-        cur.pop(k, None)
-    _write_prov(cur)
+def is_installed(pid: str) -> bool:
+    return bool(installed_all().get(pid, {}).get("ok"))
 
 
-# --- health: вердикт пробы, снятый ОДИН раз при включении (не на каждый показ) ----
+# --- креды плагинов -------------------------------------------------------------
 
 
-def _health_path() -> Path:
-    return store_path().with_name("health.json")
+def _creds_path() -> Path:
+    return store_path().with_name("creds.json")
 
 
-def health_all() -> dict[str, dict]:
-    try:
-        return json.loads(_health_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+def creds_all() -> dict[str, dict]:
+    return _read(_creds_path(), {})
 
 
-def _write_health(data: dict) -> None:
-    p = _health_path()
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, p)
+def set_creds(pid: str, creds: dict[str, str]) -> None:
+    data = creds_all()
+    data[pid] = creds
+    _write(_creds_path(), data)
 
 
-def health_set(pid: str, verdict: dict) -> None:
-    cur = health_all()
-    cur[pid] = verdict
-    _write_health(cur)
+def drop_creds(pid: str) -> None:
+    data = creds_all()
+    if data.pop(pid, None) is not None:
+        _write(_creds_path(), data)
 
 
-def health_drop(pid: str) -> None:
-    cur = health_all()
-    if cur.pop(pid, None) is not None:
-        _write_health(cur)
+def active_creds() -> dict[str, str]:
+    """env агенту: только установленные И включённые плагины."""
+    enabled = load()
+    installed = installed_all()
+    env: dict[str, str] = {}
+    for pid, creds in creds_all().items():
+        if enabled.get(pid) and installed.get(pid, {}).get("ok"):
+            env.update(creds)
+    return env
