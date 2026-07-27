@@ -22,6 +22,7 @@
   <div class="card bar">
     <label>Админ-токен <input id="admtok" type="password" placeholder="adm_…" size="32"></label>
     <button class="primary" onclick="saveToken()">Войти</button>
+    <button onclick="forgetToken()">Выйти</button>
     <span id="authmsg" class="muted"></span>
   </div>
 
@@ -53,7 +54,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-function tok() { return sessionStorage.getItem("admtok") || ""; }
+function tok() { return localStorage.getItem("admtok") || ""; }
 function hdr() { return { "Authorization": "Bearer " + tok(), "Content-Type": "application/json" }; }
 // Кавычки экранируем тоже: значения уезжают в атрибуты data-arg, а там апостроф
 // без экранирования закрыл бы атрибут. В обработчики они не подставляются вовсе.
@@ -68,8 +69,14 @@ async function api(path, opts) {
 }
 
 function saveToken() {
-  sessionStorage.setItem("admtok", $("#admtok").value.trim());
+  localStorage.setItem("admtok", $("#admtok").value.trim());
   boot();
+}
+
+// Токен лежит в localStorage: переживает перезапуск браузера, стирается только тут.
+function forgetToken() {
+  localStorage.removeItem("admtok");
+  location.reload();
 }
 
 async function boot() {

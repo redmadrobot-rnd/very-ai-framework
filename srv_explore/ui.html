@@ -197,7 +197,7 @@ const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#
 const ESC_RE = new RegExp("[" + Object.keys(ESCAPES).join("") + "]", "g");
 function esc(s) { return (s ?? "").toString().replace(ESC_RE, c => ESCAPES[c]); }
 function $(s) { return document.querySelector(s); }
-function tok() { return sessionStorage.getItem("srvxtok") || ""; }
+function tok() { return localStorage.getItem("srvxtok") || ""; }
 
 async function api(path, opts) {
   const r = await fetch(path, {
@@ -225,9 +225,10 @@ document.querySelector("nav.tabs").addEventListener("click", e => {
 
 // --- вход ---
 async function login() {
-  const v = $("#tok").value.trim();
+  // При автовходе поле пустое, токен приходит из хранилища.
+  const v = $("#tok").value.trim() || tok();
   if (!v) return;
-  sessionStorage.setItem("srvxtok", v);
+  localStorage.setItem("srvxtok", v);
   $("#authmsg").textContent = "проверяю…";
   $("#authmsg").className = "muted";
   try {
@@ -242,14 +243,14 @@ async function login() {
     $("#ask-gate").hidden = true;
     render(d);
   } catch (e) {
-    sessionStorage.removeItem("srvxtok");
+    localStorage.removeItem("srvxtok");
     $("#authmsg").textContent = e.message;
     $("#authmsg").className = "err";
   }
 }
 
 function logout() {
-  sessionStorage.removeItem("srvxtok");
+  localStorage.removeItem("srvxtok");
   location.reload();
 }
 
