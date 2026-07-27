@@ -287,47 +287,63 @@ def build_app(store: TokenStore | None = None):
             css = "/* ui.css не найден */"
         return Response(css, media_type="text/css; charset=utf-8", headers=NO_STORE)
 
-    # --- /app: кабинет инженера, за его же инженерным токеном ---
+    # --- /app: кабинет, по инженерному или админскому токену ---
     def _caller(request):
-        return authorize(request.headers.get("authorization"), tokens)
+        """Кто пришёл: метка + роль. Админ-токен пускается и сюда — отдельный
+        инженерный ему для этого не нужен, но видит он больше (все прогоны)."""
+        auth = request.headers.get("authorization")
+        if admin_authorized(auth):
+            return {"label": "admin", "role": "admin", "created": ""}
+        rec = authorize(auth, tokens)
+        if rec is None:
+            return None
+        return {"label": rec.label, "role": "engineer", "created": rec.created}
 
     async def app_me(request):
-        rec = _caller(request)
-        if rec is None:
+        who = _caller(request)
+        if who is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        active = profile_store.active_by_plugin()
+        enabled = profile_store.load()
+        installed = profile_store.installed_all()
+        runs = jobs.recent(200)
+        if who["role"] != "admin":
+            runs = [j for j in runs if j["label"] == who["label"]]
         return JSONResponse(
             {
-                "label": rec.label,
-                "created": rec.created,
+                **who,
                 "plugins": [
-                    {"name": n, "desc": d, "active": n in active}
+                    {
+                        "name": n,
+                        "desc": d,
+                        "installed": bool(installed.get(n, {}).get("ok")),
+                        "enabled": bool(enabled.get(n)),
+                    }
                     for n, d in profile_store.registry().items()
                 ],
-                "runs": [j for j in jobs.recent(200) if j["label"] == rec.label][:20],
+                "runs": runs[:20],
             }
         )
 
     async def app_ask(request):
-        rec = _caller(request)
-        if rec is None:
+        who = _caller(request)
+        if who is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         body = await request.json()
         task = (body.get("task") or "").strip()
         if not task:
             return JSONResponse({"error": "task обязателен"}, status_code=400)
         job_id = jobs.start(
-            task, label=rec.label, coro_factory=lambda steps: run_agent(task, steps)
+            task, label=who["label"], coro_factory=lambda steps: run_agent(task, steps)
         )
         return JSONResponse({"job_id": job_id})
 
     async def app_ask_status(request):
-        rec = _caller(request)
-        if rec is None:
+        who = _caller(request)
+        if who is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         job = jobs.get(request.path_params["job_id"])
-        # чужой прогон неотличим от несуществующего: инженер видит только свои
-        if job is None or job["label"] != rec.label:
+        # чужой прогон неотличим от несуществующего; админ видит любой
+        if job is None or (who["role"] != "admin" and job["label"] != who["label"]):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
         return JSONResponse(job)
 

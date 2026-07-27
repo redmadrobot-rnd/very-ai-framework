@@ -24,6 +24,7 @@ def app(tmp_path, monkeypatch):
         return "факты", steps or []
 
     monkeypatch.setattr(mcp_server, "run_agent", fake_run_agent)
+    monkeypatch.setenv("SRV_EXPLORE_ADMIN_TOKEN", "adm_test")
     store = TokenStore(tmp_path / "tokens.json")
     _, alice = store.issue("alice")
     _, bob = store.issue("bob")
@@ -45,10 +46,11 @@ def test_landing_and_css_are_public(app):
     assert "text/css" in css.headers["content-type"]
 
 
-def test_app_api_needs_engineer_token(app):
+def test_app_api_needs_a_valid_token(app):
     client, _, _ = app
     assert client.get("/app/api/me").status_code == 401
     assert client.get("/app/api/me", headers=_auth("srvx_nope")).status_code == 401
+    assert client.get("/app/api/me", headers=_auth("adm_wrong")).status_code == 401
 
 
 def test_mcp_still_gated(app):
@@ -56,12 +58,32 @@ def test_mcp_still_gated(app):
     assert client.get("/mcp").status_code == 401
 
 
-def test_me_reports_own_label_and_plugin_names_only(app):
+def test_me_reports_own_label_and_plugin_status_without_creds(app):
     client, alice, _ = app
     d = client.get("/app/api/me", headers=_auth(alice)).json()
     assert d["label"] == "alice"
+    assert d["role"] == "engineer"
     assert d["runs"] == []
-    assert {"name", "desc", "active"} == set(d["plugins"][0])
+    # статус ресурса, но не то, чем к нему ходят: креды в кабинет не уезжают
+    assert {"name", "desc", "installed", "enabled"} == set(d["plugins"][0])
+
+
+def test_admin_token_opens_the_cabinet_too(app):
+    client, alice, _ = app
+    client.post("/app/api/ask", headers=_auth(alice), json={"task": "вопрос алисы"})
+    d = client.get("/app/api/me", headers=_auth("adm_test")).json()
+    assert d["role"] == "admin"
+    # админ и так видит все прогоны в /admin — прятать их в кабинете нечего
+    assert [r["label"] for r in d["runs"]] == ["alice"]
+
+
+def test_admin_may_read_any_job(app):
+    client, alice, _ = app
+    job = client.post("/app/api/ask", headers=_auth(alice), json={"task": "т"})
+    job_id = job.json()["job_id"]
+    r = client.get(f"/app/api/ask/{job_id}", headers=_auth("adm_test"))
+    assert r.status_code == 200
+    assert r.json()["label"] == "alice"
 
 
 def test_engineer_sees_only_his_own_runs(app):

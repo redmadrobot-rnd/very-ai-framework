@@ -132,7 +132,7 @@
   <!-- ── Мой доступ ──────────────────────────────────────────── -->
   <section id="pane-me" hidden>
     <div class="card bar">
-      <label>Токен доступа <input id="tok" type="password" placeholder="srvx_…" size="32"></label>
+      <label>Токен доступа <input id="tok" type="password" placeholder="srvx_… или adm_…" size="32"></label>
       <button class="primary" data-act="login">Войти</button>
       <button data-act="logout" hidden id="logout">Выйти</button>
       <span id="authmsg" class="muted"></span>
@@ -143,7 +143,8 @@
       <div class="card">
         <dl class="kv">
           <dt>метка</dt><dd id="me-label"></dd>
-          <dt>токен выдан</dt><dd id="me-created"></dd>
+          <dt>роль</dt><dd id="me-role"></dd>
+          <dt id="dt-created">токен выдан</dt><dd id="me-created"></dd>
         </dl>
       </div>
 
@@ -153,9 +154,11 @@
         <tbody id="restbl"></tbody></table>
       </div>
       <p class="muted" style="font-size:.88rem">Файлы, логи и journald доступны всегда.
-        Остальное включает администратор — если нужного ресурса нет, попроси его.</p>
+        <b>выключен</b> — ресурс настроен, но выдачу агенту администратор закрыл;
+        <b>не настроен</b> — плагин ещё не устанавливали. Нужен ресурс — попроси
+        администратора.</p>
 
-      <h2>Мои прогоны <span class="rl"><button class="rl" data-act="refresh">⟳ обновить</button></span></h2>
+      <h2><span id="runs-title">Мои прогоны</span> <span class="rl"><button class="rl" data-act="refresh">⟳ обновить</button></span></h2>
       <div class="card tbl-card">
         <table><thead><tr><th class="chevcol"></th><th>Время</th><th>Вопрос</th><th>Статус</th></tr></thead>
         <tbody id="runstbl"></tbody></table>
@@ -224,12 +227,6 @@ document.querySelector("nav.tabs").addEventListener("click", e => {
 async function login() {
   const v = $("#tok").value.trim();
   if (!v) return;
-  if (v.startsWith("adm_")) {
-    $("#authmsg").textContent = "это админ-токен, он только для /admin — тут нужен "
-      + "инженерный srvx_…";
-    $("#authmsg").className = "err";
-    return;
-  }
   sessionStorage.setItem("srvxtok", v);
   $("#authmsg").textContent = "проверяю…";
   $("#authmsg").className = "muted";
@@ -256,18 +253,32 @@ function logout() {
   location.reload();
 }
 
+const RES_STATUS = {
+  on: '<span class="pdot ok">● доступен</span>',
+  off: '<span class="pdot setup">◐ выключен</span>',
+  none: '<span class="pdot off">— не настроен</span>',
+};
+
+let isAdmin = false;
+
 function render(d) {
+  const admin = isAdmin = d.role === "admin";
   $("#me-label").textContent = d.label;
+  $("#me-role").innerHTML = admin
+    ? 'администратор · <a href="/admin">админка</a>'
+    : "инженер";
+  $("#dt-created").hidden = admin;         // у админ-токена даты выдачи нет
+  $("#me-created").hidden = admin;
   $("#me-created").textContent = d.created || "—";
+  $("#runs-title").textContent = admin ? "Все прогоны" : "Мои прогоны";
 
   const rt = $("#restbl"); rt.innerHTML = "";
   for (const p of d.plugins) {
+    const state = !p.installed ? "none" : (p.enabled ? "on" : "off");
     const tr = document.createElement("tr");
     tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td>
       <td class="muted">${esc(p.desc)}</td>
-      <td>${p.active
-        ? '<span class="pdot ok">● доступен</span>'
-        : '<span class="pdot off">— не подключён</span>'}</td>`;
+      <td>${RES_STATUS[state]}</td>`;
     rt.appendChild(tr);
   }
   renderRuns(d.runs);
@@ -276,7 +287,8 @@ function render(d) {
 function renderRuns(runs) {
   const tb = $("#runstbl"); tb.innerHTML = "";
   if (!runs.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">Пока ничего не спрашивал.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="4" class="muted">' +
+      (isAdmin ? "Прогонов пока нет." : "Пока ничего не спрашивал.") + "</td></tr>";
     return;
   }
   runs.forEach((r, i) => {
@@ -285,7 +297,7 @@ function renderRuns(runs) {
     tr.dataset.act = "run"; tr.dataset.arg = String(i);
     tr.innerHTML = `<td class="chevcol"><span class="chev" id="chev-${i}">▸</span></td>
       <td class="muted">${esc((r.started || "").replace("T", " ").replace("+00:00", ""))}</td>
-      <td>${esc(r.task)}</td>
+      <td>${isAdmin ? `<code class="id">${esc(r.label)}</code> ` : ""}${esc(r.task)}</td>
       <td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td>`;
     tb.appendChild(tr);
     const det = document.createElement("tr");
