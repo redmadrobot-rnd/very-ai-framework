@@ -101,10 +101,13 @@ def uninstall(pid: str) -> None:
     mod = _plugin(pid)
     teardown = getattr(mod, "uninstall", None)
     if teardown is not None:
+        # Упал teardown — состояние НЕ чистим: «снят» при живом ресурсе (docker-прокси
+        # на loopback песочнице доступен и без кред) хуже честной ошибки. Плагин,
+        # которому нечего проверять, просто не бросает.
         try:
             teardown(Ctx())
-        except Exception:  # noqa: BLE001 — ресурс мог исчезнуть, состояние всё равно чистим
-            pass
+        except Exception as e:  # noqa: BLE001 — наверх как ошибка эндпоинта
+            raise RuntimeError(f"{pid}: ресурс не снят — {e}") from e
     profile_store.drop_creds(pid)
     profile_store.set_enabled(pid, False)
     profile_store.drop_checklist(pid)

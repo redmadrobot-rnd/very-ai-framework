@@ -18,12 +18,17 @@ import shlex
 # Метасимволы записи/подстановки/цепочки; пайп (|) разрешён (read-пайплайны).
 DANGEROUS = ["`", "$(", ">", "<", ";", "&", "\n", "\r"]
 SAFE_DEV = {"/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty"}
+# Дамп окружения. Гигиена, а не барьер: в env агента лежат токен модели и креды
+# плагинов, и печатать их по первой просьбе не надо. Обойти можно (см. README).
+DUMP_ENV = {"env", "printenv", "set", "export", "declare"}
 
 
 def forbidden_path(tok: str) -> bool:
     p = tok.split("=", 1)[-1].strip("\"'") if "=" in tok else tok
     if p in SAFE_DEV or p.startswith("/dev/fd/"):
         return False
+    if p.startswith("/proc/") and p.endswith("/environ"):
+        return True  # окружение агента: там токен модели и креды плагинов
     return p.startswith("/dev/") or p.startswith("/proc/kcore")
 
 
@@ -39,6 +44,8 @@ def check_command_string(command: str) -> tuple[bool, str]:
             argv = shlex.split(stage, posix=True)
         except ValueError as e:
             return False, f"не удалось разобрать команду: {e}"
+        if argv and argv[0] in DUMP_ENV:
+            return False, f"{argv[0]}: в окружении креды, печатать его нельзя"
         for tok in argv:
             if forbidden_path(tok):
                 return False, f"чтение спецфайла {tok} запрещено (устройство/поток)"

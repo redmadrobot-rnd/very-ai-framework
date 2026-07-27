@@ -13,7 +13,12 @@ DESC = "Docker — read-only через socket-proxy"
 FIELDS = []  # ничего вводить не нужно
 
 CONTAINER = "srvx-docker-proxy"
-IMAGE = "tecnativa/docker-socket-proxy:latest"
+# По digest, а не по latest: контейнер получает docker.sock хоста, поэтому
+# подмена тега — это чужой код с доступом к Docker API. Обновлять осознанно.
+IMAGE_DIGEST = (  # pragma: allowlist secret
+    "sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+)
+IMAGE = f"tecnativa/docker-socket-proxy@{IMAGE_DIGEST}"
 BIND = "127.0.0.1:2375:2375"
 DOCKER_HOST = "tcp://127.0.0.1:2375"
 # read-эндпоинты on, любые мутации off
@@ -92,4 +97,8 @@ def toggle(ctx, enabled):
 
 
 def uninstall(ctx):
-    ctx.sh(["docker", "rm", "-f", CONTAINER])
+    # Прокси слушает loopback, а он песочнице разрешён: если контейнер не снёсся,
+    # состояние чистить нельзя — иначе плагин «снят», а Docker всё ещё читается.
+    rc, _, err = ctx.sh(["docker", "rm", "-f", CONTAINER], timeout=60)
+    if rc != 0 and "No such container" not in err:
+        raise RuntimeError(f"не снят контейнер {CONTAINER}: {err.strip()[:120]}")

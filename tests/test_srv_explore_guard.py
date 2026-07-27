@@ -63,3 +63,19 @@ def test_deny(command: str) -> None:
 def test_empty_command_denied() -> None:
     ok, _ = check_command_string("   ")
     assert not ok
+
+
+def test_env_dump_is_refused():
+    """В окружении агента токен модели и креды плагинов."""
+    for cmd in (
+        "env",
+        "printenv PG_INSPECTOR_DSN",
+        "env | grep DSN",
+        "cat /proc/self/environ",
+        "cat /proc/1/environ",
+    ):
+        ok, reason = check_command_string(cmd)
+        assert not ok, cmd
+    # обычное чтение не задето
+    assert check_command_string("cat /etc/os-release")[0]
+    assert check_command_string("ps -eo pid,args | grep nginx")[0]
