@@ -1,8 +1,10 @@
 """Remote MCP srv-explore: на хосте живёт readonly-агент, на вход — задача.
 
-Инженер из своего Claude Code дёргает tool `srv_explore(task)`. Сервис (root) провижинит
-и спавнит агента в ПЕСОЧНИЦЕ (sandbox.py: unprivileged `srvx-agent` + RO-FS); опасный
-bash крутится там, не здесь. Каждую Bash-команду агента фильтрует гард-гигиена.
+Инженер из своего Claude Code дёргает `srv_explore(task)` (задача агенту) или
+`srv_explore_cmd(cmd)` (одна команда, без агента). Сервис (root) провижинит и спавнит
+код в ПЕСОЧНИЦЕ (sandbox.py: unprivileged `srvx-agent` + RO-FS); опасный bash крутится
+там, не здесь. Команды фильтрует guard: для агента это гигиена, для `srv_explore_cmd` —
+гейт, потому что вход там не свой агент, а вызывающая сторона.
 
 Read-only держит РЕСУРС-СЛОЙ (RO-FS песочницы, read-only роли БД, docker-socket-proxy,
 egress-firewall) — см. README. Плюс bearer-токен на входе (token_store).
@@ -25,6 +27,7 @@ from pathlib import Path
 
 from srv_explore import (
     backstop,
+    guard,
     plugin_store,
     provision,
     sandbox,
@@ -158,6 +161,14 @@ def security_probe() -> dict:
         return {}
 
 
+def plugin_creds() -> dict:
+    """Креды включённых плагинов — то, чем агент ходит к ресурсам."""
+    env: dict[str, str] = {}
+    for creds in plugin_store.active_by_plugin().values():
+        env.update(creds)
+    return env
+
+
 async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     """Прогнать задачу readonly-агентом В ПЕСОЧНИЦЕ; вернуть (отчёт, команды сессии).
 
@@ -167,8 +178,7 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
     active = plugin_store.active_by_plugin()  # только установленные и включённые
     reg = plugin_store.registry()
-    for creds in active.values():
-        env.update(creds)
+    env.update(plugin_creds())
     # чтобы агент не гадал, что ему выдали: описание плагина + имена переменных
     env["SRV_EXPLORE_RESOURCES"] = "; ".join(
         f"{reg.get(pid, pid)} — {', '.join(creds)}"
@@ -215,6 +225,49 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     raise RuntimeError(f"агент не вернул результат. {tail}")
 
 
+# Сколько держим вызов srv_explore открытым, прежде чем отдать job_id и уйти в poll.
+# Меньше потолка прогона (sandbox.MAX_SEC): вернуть job_id надо ДО того, как прогон
+# оборвут, иначе вызывающий не узнает, где смотреть собранное.
+WAIT_SEC = 480
+PROGRESS_SEC = 20  # шаг heartbeat: без него долгий вызов рвут по таймауту клиента
+
+CMD_MAX_SEC = os.environ.get("SRV_EXPLORE_CMD_MAX_SEC", "60")
+CMD_MAX_OUT = 30_000  # вывод уезжает в контекст вызывающего, а не человеку на экран
+
+
+async def run_command(cmd: str) -> dict:
+    """Одна команда в той же песочнице, без агента: гард → sandbox → вывод.
+
+    Барьеры те же (RO-FS, unprivileged-юзер, egress-firewall, docker без POST), но
+    вход здесь — не свой агент, а вызывающая сторона, поэтому гард тут не гигиена, а
+    гейт: он единственный, кто стоит между строкой и bash. Плюс вывод чистится от
+    кредов и режется по объёму.
+    """
+    ok, reason = guard.check_command_string(cmd)
+    if not ok:
+        return {"ok": False, "cmd": cmd, "reason": reason, "output": ""}
+    creds = plugin_creds()
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **creds}
+
+    def spawn():
+        return sandbox.run(["/bin/bash", "-c", cmd], extra_env=env, max_sec=CMD_MAX_SEC)
+
+    rc, out, err = await asyncio.to_thread(spawn)
+    text = out if out.strip() else err
+    text = sandbox.redact(text, creds.values())
+    cut = len(text) > CMD_MAX_OUT
+    if cut:
+        text = text[:CMD_MAX_OUT]
+    return {
+        "ok": rc == 0,
+        "cmd": cmd,
+        "code": rc,
+        "output": text,
+        "truncated": cut,
+        "reason": "" if rc == 0 else f"код {rc} (лимит {CMD_MAX_SEC}s)",
+    }
+
+
 # --- реестр задач (job-id + poll) --------------------------------------------
 
 
@@ -224,11 +277,12 @@ class JobRegistry:
     def __init__(self, limit: int = 200):
         self._jobs: dict[str, dict] = {}
         self._order: list[str] = []
+        self._done: dict[str, asyncio.Event] = {}
         self.limit = limit
 
-    def start(self, task: str, label: str, coro_factory) -> str:
+    def _add(self, task: str, label: str, **fields) -> dict:
         job_id = "job_" + secrets.token_hex(6)
-        self._jobs[job_id] = {
+        job = {
             "id": job_id,
             "task": task,
             "label": label,
@@ -238,10 +292,25 @@ class JobRegistry:
             "result": None,
             "error": None,
             "steps": [],
+            **fields,
         }
+        self._jobs[job_id] = job
         self._order.append(job_id)
         if len(self._order) > self.limit:
-            self._jobs.pop(self._order.pop(0), None)
+            dropped = self._order.pop(0)
+            self._jobs.pop(dropped, None)
+            self._done.pop(dropped, None)
+        return job
+
+    def record(self, task: str, label: str, **fields) -> dict:
+        """Готовый одношаговый прогон (атомарная команда) — сразу в историю."""
+        return self._add(task, label, finished=_now(), **fields)
+
+    def start(self, task: str, label: str, coro_factory) -> str:
+        job_id = self._add(task, label)["id"]
+
+        done = asyncio.Event()
+        self._done[job_id] = done
 
         async def runner():
             job = self._jobs.get(job_id)
@@ -255,9 +324,22 @@ class JobRegistry:
             except Exception as e:  # noqa: BLE001 — статус задачи, не глушим молча
                 if job:
                     job.update(status="error", error=repr(e), finished=_now())
+            finally:
+                done.set()
 
         asyncio.ensure_future(runner())
         return job_id
+
+    async def wait(self, job_id: str, timeout: float) -> bool:
+        """Дождаться конца прогона. False — не успел, job живёт дальше."""
+        done = self._done.get(job_id)
+        if done is None:
+            return True
+        try:
+            await asyncio.wait_for(done.wait(), timeout)
+        except asyncio.TimeoutError:
+            return False
+        return True
 
     def get(self, job_id: str) -> dict | None:
         return self._jobs.get(job_id)
@@ -286,40 +368,97 @@ def build_app(store: TokenStore | None = None):
     security = security_probe()  # один раз при старте (в песочнице агента)
     mcp = FastMCP("srv-explore", streamable_http_path="/mcp")
 
+    def _label() -> str:
+        who = CURRENT.get()
+        return who.label if who else "?"
+
+    def _resources() -> list[str]:
+        reg = plugin_store.registry()
+        return [reg.get(p, p) for p in sorted(plugin_store.active_by_plugin())]
+
     @mcp.tool()
     async def srv_explore(task: str) -> str:
         """Спросить сервер: readonly-агент на хосте выполнит задачу и вернёт факты.
 
-        Асинхронно: здесь возвращается только job_id, результат забирай
-        srv_explore_status(job_id), опрашивая раз в 3-5 секунд (прогон занимает от
-        20 секунд до нескольких минут, потолок — 10 минут).
+        Вызов держится до конца прогона (обычно от 20 секунд до нескольких минут) и
+        возвращает факты сразу; ход прогона идёт progress-нотификациями. Если прогон
+        не уложился в 8 минут, вернётся status=running с job_id — тогда добирай
+        результат через srv_explore_status(job_id).
 
-        task — цель словами, без готовых команд («почему сервис отдаёт 502?»).
+        task — цель словами, без готовых команд («почему сервис отдаёт 502?»). Нужна
+        конкретная команда, а не разведка — дешевле и быстрее srv_explore_cmd.
+
         Агент только смотрит: изменить файлы, БД или контейнеры он не может, наружу
         ходит только по адресам, которые открыл администратор — просить его о
         большем бесполезно.
 
         В ответе resources — к чему у него сейчас есть доступ помимо файлов и логов.
         """
-        who = CURRENT.get()
-        label = who.label if who else "?"
         job_id = jobs.start(
-            task, label=label, coro_factory=lambda steps: run_agent(task, steps)
+            task, label=_label(), coro_factory=lambda steps: run_agent(task, steps)
         )
-        reg = plugin_store.registry()
-        resources = [reg.get(p, p) for p in sorted(plugin_store.active_by_plugin())]
-        return json.dumps(
-            {"job_id": job_id, "status": "running", "resources": resources},
-            ensure_ascii=False,
+        ctx = mcp.get_context()
+        job = jobs.get(job_id) or {}
+        sent = 0
+        deadline = asyncio.get_running_loop().time() + WAIT_SEC
+        while True:
+            steps = job.get("steps") or []
+            # прогресс — индикация для человека: модель его не увидит, ей важен финал
+            last = steps[-1]["cmd"] if steps else "готовлю прогон"
+            sent += 1
+            await ctx.report_progress(progress=sent, message=last[:200])
+            left = deadline - asyncio.get_running_loop().time()
+            if left <= 0 or await jobs.wait(job_id, min(PROGRESS_SEC, max(left, 0))):
+                break
+        out = {
+            "job_id": job_id,
+            "status": job.get("status", "running"),
+            "resources": _resources(),
+            "steps": job.get("steps") or [],
+        }
+        if job.get("status") == "done":
+            out["result"] = job.get("result")
+        elif job.get("status") == "error":
+            out["error"] = job.get("error")
+        return json.dumps(out, ensure_ascii=False)
+
+    @mcp.tool()
+    async def srv_explore_cmd(cmd: str) -> str:
+        """Выполнить на сервере одну команду и вернуть её вывод. Без агента.
+
+        Для случаев, когда команда уже известна: дешевле и быстрее srv_explore, ответ
+        не пересказан, а дословный. Одна команда за вызов.
+
+        Форма: без переводов строк, редиректов (`>`, `<`), цепочек (`;`, `&&`, `&`) и
+        подстановок `$(…)` — их отклонит фильтр. Пайпы из read-утилит можно
+        (`… | grep`, `… | head`). Креды включённых плагинов уже в окружении:
+        подставляй по имени (`psql "$PG_INSPECTOR_DSN" -c "select 1"`), значения из
+        вывода вырезаются.
+
+        Писать нельзя на уровне ядра: ФС read-only, роли БД без записи, Docker API
+        без POST. Отказ фильтра — меняй форму команды, а не формулировку.
+        """
+        res = await run_command(cmd)
+        jobs.record(
+            cmd,
+            label=_label(),
+            status="done" if res["ok"] else "error",
+            result=res["output"] or None,
+            error=res["reason"] or None,
+            steps=[{"cmd": cmd, "ok": res["ok"], "reason": res["reason"]}],
         )
+        return json.dumps(res, ensure_ascii=False)
 
     @mcp.tool()
     async def srv_explore_status(job_id: str) -> str:
-        """Статус задачи разведки: running | done | error.
+        """Догнать прогон, который не уложился в один вызов: running | done | error.
 
-        running — продолжай опрашивать; steps растёт по ходу и показывает, какие
-        команды агент уже выполнил (ok=false значит команду отклонила гигиена, агент
-        обычно переформулирует сам).
+        Нужен только если srv_explore вернул status=running (или вызов оборвался по
+        таймауту клиента) — в обычном случае факты приходят сразу.
+
+        running — прогон ещё идёт, опрашивай раз в 3-5 секунд; steps растёт по ходу и
+        показывает, какие команды агент уже выполнил (ok=false значит команду
+        отклонил фильтр, агент обычно переформулирует сам).
         done — result содержит факты: что спросили, какие команды, что показали.
         error — в error причина; шаги, собранные до обрыва, остаются в steps и обычно
         уже отвечают на часть вопроса.

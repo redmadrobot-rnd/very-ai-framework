@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from srv_explore import mcp_server
@@ -109,3 +111,54 @@ def test_identify_prefers_admin_then_engineer(tmp_path, monkeypatch):
     who = mcp_server.identify(f"Bearer {token}", store)
     assert (who.role, who.label) == ("engineer", "alice")
     assert mcp_server.identify("Bearer nope", store) is None
+
+
+def test_job_wait_returns_when_run_finishes():
+    """Вызов srv_explore держится до конца прогона — на этом ожидании."""
+
+    async def scenario():
+        jobs = mcp_server.JobRegistry()
+
+        async def work(steps):
+            steps.append({"cmd": "ls", "ok": True, "reason": ""})
+            return "факты", steps
+
+        job_id = jobs.start("задача", label="alice", coro_factory=work)
+        assert await jobs.wait(job_id, timeout=5) is True
+        job = jobs.get(job_id)
+        assert (job["status"], job["result"]) == ("done", "факты")
+
+    asyncio.run(scenario())
+
+
+def test_job_wait_times_out_but_run_survives():
+    """Не уложились — отдаём job_id, прогон продолжается и добирается поллингом."""
+
+    async def scenario():
+        jobs = mcp_server.JobRegistry()
+        started = asyncio.Event()
+
+        async def work(steps):  # noqa: ARG001
+            started.set()
+            await asyncio.sleep(0.2)
+            return "поздние факты", []
+
+        job_id = jobs.start("долгая", label="alice", coro_factory=work)
+        await started.wait()
+        assert await jobs.wait(job_id, timeout=0.01) is False
+        assert jobs.get(job_id)["status"] == "running"
+        assert await jobs.wait(job_id, timeout=5) is True
+        assert jobs.get(job_id)["result"] == "поздние факты"
+
+    asyncio.run(scenario())
+
+
+def test_recorded_command_lands_in_history():
+    jobs = mcp_server.JobRegistry()
+    jobs.record("ls /etc", label="alice", status="done", result="passwd")
+    (job,) = jobs.recent()
+    assert (job["task"], job["status"], job["finished"] is not None) == (
+        "ls /etc",
+        "done",
+        True,
+    )

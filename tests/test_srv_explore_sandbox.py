@@ -11,8 +11,8 @@ import pytest
 from srv_explore import sandbox
 
 
-def _props() -> dict[str, str]:
-    return dict(p.split("=", 1) for p in sandbox._PROPS)
+def _props(max_sec=None) -> dict[str, str]:
+    return dict(p.split("=", 1) for p in sandbox.props(max_sec))
 
 
 def test_hardening_properties_present():
@@ -21,6 +21,8 @@ def test_hardening_properties_present():
     assert p["NoNewPrivileges"] == "yes"
     assert p["IPAddressDeny"] == "any"
     assert int(p["RuntimeMaxSec"]) > 0
+    # одиночная команда живёт своим капом, прогон агента — общим
+    assert _props("60")["RuntimeMaxSec"] == "60"
 
 
 def test_ip_allow_are_parseable_prefixes():

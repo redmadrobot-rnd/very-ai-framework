@@ -46,9 +46,19 @@ _PROPS = [
     "ProtectHome=read-only",
     "PrivateTmp=yes",
     "NoNewPrivileges=yes",
-    f"RuntimeMaxSec={MAX_SEC}",
     "IPAddressDeny=any",  # внешка обрублена; ниже — что разрешено
 ]
+
+
+def props(max_sec: str | None = None) -> list[str]:
+    """Свойства юнита песочницы. Кап по времени зависит от вызова: прогон агента
+    минуты, одиночная команда — секунды."""
+    return [
+        *_PROPS,
+        f"RuntimeMaxSec={max_sec or MAX_SEC}",
+        f"IPAddressAllow={_ip_allow()}",
+    ]
+
 
 # Прокси для внешки (API модели + доверенные домены); внутреннее — напрямую (NO_PROXY).
 _PROXY_ENV = {
@@ -63,6 +73,19 @@ _PROXY_ENV = {
 
 def available() -> bool:
     return shutil.which("systemd-run") is not None and os.geteuid() == 0
+
+
+def redact(text: str, secrets) -> str:
+    """Затереть значения кредов в выводе.
+
+    Гард запрещает дамп окружения, но обойти его формой команды несложно, а вывод
+    уезжает вызывающему целиком. Поэтому значения, которые мы сами положили в
+    окружение, из вывода вырезаем — это последний рубеж, а не единственный.
+    """
+    for value in sorted({str(s) for s in secrets if s}, key=len, reverse=True):
+        if len(value) >= 8:  # короткие значения (порт, имя юзера) — не секрет
+            text = text.replace(value, "***")
+    return text
 
 
 def _quote(value) -> str:
@@ -82,6 +105,7 @@ def run(
     input_text: str | None = None,
     extra_env: dict | None = None,
     on_line=None,
+    max_sec: str | None = None,
 ):
     """Запустить args в песочнице. Вернуть (returncode, stdout, stderr).
 
@@ -107,9 +131,8 @@ def run(
             "--wait",
             f"--uid={AGENT_USER}",
         ]
-        for p in _PROPS:
+        for p in props(max_sec):
             cmd += ["-p", p]
-        cmd += ["-p", f"IPAddressAllow={_ip_allow()}"]
         cmd += ["-p", f"EnvironmentFile={envfile}"]
         cmd += list(args)
 
