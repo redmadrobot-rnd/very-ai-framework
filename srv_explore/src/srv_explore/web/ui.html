@@ -27,8 +27,8 @@
       сырые факты — что запустил и что это показало. Изменить он ничего не может, и это не
       обещание модели, а свойство окружения, в которое он заперт.</p>
 
-    <svg class="flow" viewBox="0 28 880 158" role="img"
-         aria-label="Схема: инженер через SSH-туннель обращается к сервису, тот спавнит агента в песочнице, агент только читает хост">
+    <svg class="flow" viewBox="0 0 880 268" role="img"
+         aria-label="Схема: у админа свой путь — админка /admin, где он выдаёт ключи и включает ресурсы; у разработчика свой — MCP-сервер /mcp по SSH-туннелю с токеном, который спавнит агента в песочнице, агент только читает хост и возвращает факты">
       <defs>
         <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
           <path d="M0 0 L10 5 L0 10 z" fill="#8b949e"/>
@@ -36,45 +36,67 @@
         <style>
           .bx { fill:#161b22; stroke:#30363d; }
           .bxa { fill:#161b22; stroke:#2f81f7; }
+          .zone { fill:#ffffff05; stroke:#30363d; stroke-dasharray:4 3; }
           .t { fill:#e6edf3; font: 600 13px system-ui, sans-serif; }
           .s { fill:#8b949e; font: 400 11px system-ui, sans-serif; }
+          .z { fill:#8b949e; font: 600 10px system-ui, sans-serif; letter-spacing:.08em; }
           .ln { stroke:#8b949e; stroke-width:1.4; fill:none; marker-end:url(#a); }
+          .dash { stroke-dasharray:5 4; }
         </style>
       </defs>
 
-      <rect class="bx" x="4" y="52" width="150" height="62" rx="9"/>
-      <text class="t" x="79" y="78" text-anchor="middle">Инженер</text>
-      <text class="s" x="79" y="96" text-anchor="middle">свой Claude Code</text>
+      <rect class="zone" x="196" y="4" width="680" height="260" rx="12"/>
+      <text class="z" x="210" y="22">ХОСТ</text>
+      <rect class="zone" x="210" y="30" width="250" height="182" rx="10"/>
+      <text class="z" x="222" y="48">СЕРВИС · ROOT</text>
 
-      <path class="ln" d="M158 83 H246"/>
-      <text class="s" x="202" y="74" text-anchor="middle">SSH-туннель</text>
-      <text class="s" x="202" y="104" text-anchor="middle">+ токен</text>
+      <rect class="bx" x="4" y="56" width="164" height="56" rx="9"/>
+      <text class="t" x="86" y="80" text-anchor="middle">Админ</text>
+      <text class="s" x="86" y="98" text-anchor="middle">браузер</text>
 
-      <rect class="bx" x="250" y="40" width="160" height="86" rx="9"/>
-      <text class="t" x="330" y="70" text-anchor="middle">Сервис</text>
-      <text class="s" x="330" y="88" text-anchor="middle">root, на хосте</text>
-      <text class="s" x="330" y="106" text-anchor="middle">выдаёт доступы</text>
+      <path class="ln" d="M172 84 H218"/>
+      <text class="s" x="195" y="76" text-anchor="middle">токен</text>
+      <text class="s" x="195" y="105" text-anchor="middle">админа</text>
 
-      <path class="ln" d="M414 83 H502"/>
-      <text class="s" x="458" y="74" text-anchor="middle">одноразовая</text>
-      <text class="s" x="458" y="104" text-anchor="middle">песочница</text>
+      <rect class="bx" x="222" y="56" width="226" height="56" rx="9"/>
+      <text class="t" x="335" y="80" text-anchor="middle">Админка /admin</text>
+      <text class="s" x="335" y="98" text-anchor="middle">ключи · токены · плагины</text>
 
-      <rect class="bxa" x="506" y="40" width="160" height="86" rx="9"/>
-      <text class="t" x="586" y="70" text-anchor="middle">Агент</text>
-      <text class="s" x="586" y="88" text-anchor="middle">без прав, RO-ФС</text>
-      <text class="s" x="586" y="106" text-anchor="middle">без интернета</text>
+      <path class="ln dash" d="M335 116 V152"/>
+      <text class="s" x="345" y="139">выдаёт доступ, включает ресурсы</text>
 
-      <path class="ln" d="M670 83 H758"/>
-      <text class="s" x="714" y="74" text-anchor="middle">только</text>
-      <text class="s" x="714" y="104" text-anchor="middle">чтение</text>
+      <rect class="bx" x="222" y="156" width="226" height="46" rx="9"/>
+      <text class="t" x="335" y="177" text-anchor="middle">MCP-сервер /mcp</text>
+      <text class="s" x="335" y="193" text-anchor="middle">+ кабинет на странице /</text>
 
-      <rect class="bx" x="762" y="40" width="114" height="86" rx="9"/>
-      <text class="t" x="819" y="70" text-anchor="middle">Хост</text>
-      <text class="s" x="819" y="88" text-anchor="middle">логи · файлы</text>
-      <text class="s" x="819" y="106" text-anchor="middle">docker · БД</text>
+      <rect class="bx" x="4" y="151" width="164" height="56" rx="9"/>
+      <text class="t" x="86" y="175" text-anchor="middle">Разработчик</text>
+      <text class="s" x="86" y="193" text-anchor="middle">Claude Code · браузер</text>
 
-      <path class="ln" d="M586 134 V160 H79 V120"/>
-      <text class="s" x="333" y="176" text-anchor="middle">факты: какие команды и что показали</text>
+      <path class="ln" d="M172 179 H218"/>
+      <text class="s" x="195" y="171" text-anchor="middle">туннель</text>
+      <text class="s" x="195" y="200" text-anchor="middle">+ токен</text>
+
+      <path class="ln" d="M452 179 H520"/>
+      <text class="s" x="486" y="171" text-anchor="middle">одноразовая</text>
+      <text class="s" x="486" y="200" text-anchor="middle">песочница</text>
+
+      <rect class="bxa" x="524" y="146" width="166" height="66" rx="9"/>
+      <text class="t" x="607" y="172" text-anchor="middle">Агент</text>
+      <text class="s" x="607" y="189" text-anchor="middle">без прав, RO-ФС</text>
+      <text class="s" x="607" y="205" text-anchor="middle">без интернета</text>
+
+      <path class="ln" d="M694 179 H756"/>
+      <text class="s" x="725" y="171" text-anchor="middle">только</text>
+      <text class="s" x="725" y="200" text-anchor="middle">чтение</text>
+
+      <rect class="bx" x="760" y="146" width="112" height="66" rx="9"/>
+      <text class="t" x="816" y="172" text-anchor="middle">Хост</text>
+      <text class="s" x="816" y="189" text-anchor="middle">логи · файлы</text>
+      <text class="s" x="816" y="205" text-anchor="middle">docker · БД</text>
+
+      <path class="ln" d="M607 220 V244 H86 V213"/>
+      <text class="s" x="346" y="238" text-anchor="middle">факты: какие команды и что показали</text>
     </svg>
 
     <div class="cols">
