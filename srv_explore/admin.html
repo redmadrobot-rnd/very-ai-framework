@@ -329,10 +329,9 @@ async function installPlugin(name, fromForm) {
 
 async function uninstallPlugin(name) {
   if (profBusy) return;
-  if (!confirm("Снять установку " + name + "?
-
-Креды будут забыты, плагин выключится.
-Созданная в ресурсе read-only учётка останется — удалить её можно только вручную.")) return;
+  if (!confirm("Снять установку " + name + "?\n\n"
+    + "Креды будут забыты, плагин выключится.\n"
+    + "Созданная в ресурсе read-only учётка останется — удалить её можно только вручную.")) return;
   setProfBusy(true);
   try { await post({ name, action: "uninstall" }); } catch (e) { alert(e.message); }
   setProfBusy(false);
