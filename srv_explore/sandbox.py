@@ -64,8 +64,14 @@ def available() -> bool:
 
 
 def _quote(value) -> str:
-    """Значение для systemd EnvironmentFile: в кавычках, с экранированием."""
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    """Значение для systemd EnvironmentFile: в кавычках, с экранированием.
+
+    Переводы строк вырезаются: в EnvironmentFile такое значение разорвалось бы на две
+    записи — вторая половина стала бы отдельной переменной. Кред с \\n всё равно битый,
+    но пусть ломается он один, а не всё окружение агента.
+    """
+    text = str(value).replace("\r", "").replace("\n", "")
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 

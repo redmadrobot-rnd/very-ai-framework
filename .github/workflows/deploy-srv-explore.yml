@@ -41,6 +41,8 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           source: "srv_explore/**"
           target: "/srv/deploy/${{ github.event.repository.name }}/srv-explore"
+          # без rm удалённый в git плагин остаётся в staging и продолжает ехать на хост
+          rm: true
 
       - name: Install + inject model auth + restart
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5

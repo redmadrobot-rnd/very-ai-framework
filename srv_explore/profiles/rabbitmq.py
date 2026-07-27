@@ -1,61 +1,141 @@
-"""Плагин rabbitmq: заводит monitoring-юзера (read) на локальной ноде.
+"""Плагин rabbitmq: monitoring-юзер management-API на локальной ноде.
 
 Админ-доступ здесь локальный (rabbitmqctl от root), внешний admin-DSN не нужен.
-Read-only держат пустые config/write permissions: писать нечего, читать всё.
+
+Почему НЕ AMQP: в модели RabbitMQ `queue.purge`, `basic.get` и `basic.consume`
+требуют только `read` на очередь — то есть кред с read='.*' вычерпывает и чистит
+любую очередь. Поэтому все три AMQP-права выданы пустыми (^$), а смотреть агент
+ходит в management HTTP API под тегом monitoring: очереди, глубины, подключения
+и каналы видны, менять нельзя ничего.
 """
 
 from srv_explore.plugin_api import step
 
 ID = "rabbitmq"
-DESC = "RabbitMQ — monitoring-юзер (read)"
+DESC = "RabbitMQ — monitoring через management API"
 FIELDS = []  # ничего вводить не нужно
-CREDS_ENV = "RABBITMQ_INSPECTOR_DSN"
+PACKAGES = ["curl"]
+CREDS_ENV = "RABBITMQ_INSPECTOR_API"
 RO_USER = "srvx_readonly"
 VHOST = "/"
-PORT = 5672
+API_HOST = "127.0.0.1:15672"
+DENY = "^$"  # пустой regex: под него не подходит ни одно имя ресурса
+PROBE_QUEUE = "srvx-probe"
+
+
+def _ctl(ctx, args, pw=None):
+    """rabbitmqctl. Пароль (если нужен) уходит в stdin: в argv он виден в `ps`."""
+    return ctx.sh(["rabbitmqctl", *args], timeout=60, input_text=pw)
+
+
+def _api(ctx, method: str, path: str, pw: str):
+    """Вызов management API под создаваемым юзером. Возвращает (http_code, тело)."""
+    rc, out, err = ctx.sh(
+        [
+            "curl",
+            "-sS",
+            "-u",
+            f"{RO_USER}:{pw}",
+            "-o",
+            "/dev/stdout",
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            method,
+            f"http://{API_HOST}{path}",
+        ],
+        timeout=30,
+    )
+    if rc != 0:
+        return "000", err.strip()[:120]
+    body, _, code = out.rpartition("\n")
+    return code.strip(), body.strip()
+
+
+def _set_password(ctx, cmd: str, pw: str):
+    """add_user/change_password без пароля в argv: rabbitmqctl спрашивает его сам и
+    в неинтерактивном режиме читает со stdin. Старые сборки так не умеют — тогда
+    честно откатываемся на argv и говорим об этом в чеклисте."""
+    rc, _, err = _ctl(ctx, [cmd, RO_USER], pw=f"{pw}\n{pw}\n")
+    if rc == 0:
+        return rc, err, "пароль через stdin"
+    rc, _, err = _ctl(ctx, [cmd, RO_USER, pw])
+    return rc, err, "пароль ушёл в argv: rabbitmqctl не взял его со stdin"
 
 
 def install(ctx):
-    yield step("клиент rabbitmqctl", ctx.which("rabbitmqctl"), "утилита ноды")
+    # rabbitmqctl ставится вместе с брокером, apt тут докидывает только curl
+    apt_ok, apt_detail = ctx.apt(PACKAGES)
+    has_ctl = ctx.which("rabbitmqctl")
+    yield step(
+        "клиенты",
+        apt_ok and has_ctl,
+        "rabbitmqctl + curl"
+        if apt_ok and has_ctl
+        else (
+            "rabbitmqctl не найден — RabbitMQ на хосте нет" if apt_ok else apt_detail
+        ),
+    )
 
-    rc, _, err = ctx.sh(["rabbitmqctl", "status"], timeout=60)
+    rc, _, err = _ctl(ctx, ["status"])
     yield step("нода обнаружена", rc == 0, err.strip()[:160] or "status ok")
 
-    pw = ctx.password()
-    rc, _, _ = ctx.sh(["rabbitmqctl", "add_user", RO_USER, pw], timeout=60)
-    if rc != 0:  # юзер уже есть — ротируем пароль
-        rc, _, err = ctx.sh(["rabbitmqctl", "change_password", RO_USER, pw], timeout=60)
-    else:
-        err = ""
-    yield step("юзер создан", rc == 0, err.strip()[:160] or RO_USER)
-
-    rc, _, err = ctx.sh(
-        ["rabbitmqctl", "set_user_tags", RO_USER, "monitoring"], timeout=60
+    # Без management-плагина смотреть нечем: AMQP-права мы отдаём пустыми. Живой API
+    # без кред отвечает 401 — этого достаточно, чтобы отличить его от выключенного.
+    rc, code, _ = ctx.sh(
+        [
+            "curl",
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            f"http://{API_HOST}/api/overview",
+        ],
+        timeout=20,
     )
-    yield step("тег monitoring", rc == 0, err.strip()[:160] or "monitoring")
-
-    # config='' write='' read='.*' — создавать/публиковать нельзя, читать можно всё
-    rc, _, err = ctx.sh(
-        ["rabbitmqctl", "set_permissions", "-p", VHOST, RO_USER, "^$", "^$", ".*"],
-        timeout=60,
-    )
-    yield step("права read-only", rc == 0, err.strip()[:160] or "config/write пустые")
-
-    # Проба записью здесь невозможна: AMQP-клиента на хосте нет, есть только
-    # rabbitmqctl. Поэтому вычитываем применённые права обратно с брокера.
-    rc, out, _ = ctx.sh(
-        ["rabbitmqctl", "list_user_permissions", RO_USER, "--formatter", "json"],
-        timeout=60,
-    )
-    locked = rc == 0 and '"^$"' in out.replace(" ", "")
+    up = code.strip() in ("200", "401")
     yield step(
-        "запись закрыта (по правам)",
-        locked,
-        "config/write = ^$" if locked else "права не подтвердились брокером",
+        "management API включён",
+        up,
+        API_HOST if up else "включи: rabbitmq-plugins enable rabbitmq_management",
     )
 
-    ctx.creds = {CREDS_ENV: f"amqp://{RO_USER}:{pw}@127.0.0.1:{PORT}/"}
+    pw = ctx.password()
+    rc, err, how = _set_password(ctx, "add_user", pw)
+    if rc != 0:  # юзер уже есть — ротируем пароль
+        rc, err, how = _set_password(ctx, "change_password", pw)
+    yield step("юзер создан", rc == 0, err.strip()[:160] or f"{RO_USER}, {how}")
+
+    rc, _, err = _ctl(ctx, ["set_user_tags", RO_USER, "monitoring"])
+    yield step("тег monitoring", rc == 0, err.strip()[:160] or "чтение метрик")
+
+    # Все три пустые: ни publish, ни declare, ни consume/get/purge через AMQP.
+    rc, _, err = _ctl(ctx, ["set_permissions", "-p", VHOST, RO_USER, DENY, DENY, DENY])
+    yield step(
+        "AMQP-права сняты", rc == 0, err.strip()[:160] or "configure/write/read = ^$"
+    )
+
+    code, body = _api(ctx, "GET", "/api/queues", pw)
+    yield step("API читает", code == "200", f"GET /api/queues → {code} {body[:100]}")
+
+    # Проба-нарушитель: PUT создаёт очередь. Не зависит от того, есть ли очереди на
+    # ноде (в отличие от purge, который на несуществующей вернул бы 404 — отказ не
+    # по правам). Прошло — юзер не read-only, убираем за собой.
+    code, body = _api(ctx, "PUT", f"/api/queues/%2F/{PROBE_QUEUE}", pw)
+    denied = code in ("401", "403")
+    if code in ("201", "204"):
+        _api(ctx, "DELETE", f"/api/queues/%2F/{PROBE_QUEUE}", pw)
+    yield step(
+        "запись отбита",
+        denied,
+        f"создание очереди → {code}"
+        if denied
+        else f"создание очереди вернуло {code} — юзер не read-only",
+    )
+
+    ctx.creds = {CREDS_ENV: f"http://{RO_USER}:{pw}@{API_HOST}"}
 
 
 def uninstall(ctx):
-    ctx.sh(["rabbitmqctl", "delete_user", RO_USER], timeout=60)
+    _ctl(ctx, ["delete_user", RO_USER])

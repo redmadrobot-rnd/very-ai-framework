@@ -175,7 +175,11 @@
 const $ = s => document.querySelector(s);
 function tok() { return sessionStorage.getItem("admtok") || ""; }
 function hdr() { return { "Authorization": "Bearer " + tok(), "Content-Type": "application/json" }; }
-function esc(s) { return (s ?? "").toString().replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+// Кавычки экранируем тоже: значения уезжают в атрибуты data-arg, а там апостроф
+// без экранирования закрыл бы атрибут. В обработчики они не подставляются вовсе.
+const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const ESC_RE = new RegExp("[" + Object.keys(ESCAPES).join("") + "]", "g");
+function esc(s) { return (s ?? "").toString().replace(ESC_RE, c => ESCAPES[c]); }
 
 async function api(path, opts) {
   const r = await fetch(path, Object.assign({ headers: hdr() }, opts || {}));
@@ -255,13 +259,13 @@ async function loadProfiles() {
     tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td>
       <td class="muted">${esc(p.desc)}</td>
       <td>${mark}
-        <button class="rl" onclick="installPlugin('${esc(p.name)}')">${p.installed ? "переустановить" : "Install"}</button>
-        <button class="rl" onclick="uninstallPlugin('${esc(p.name)}')">снять</button>
-        ${p.checklist && p.checklist.length ? `<button class="rl" onclick="toggleChecklist('${esc(p.name)}')">чеклист</button>` : ""}
+        <button class="rl" data-act="install" data-arg="${esc(p.name)}">${p.installed ? "переустановить" : "Install"}</button>
+        <button class="rl" data-act="uninstall" data-arg="${esc(p.name)}">снять</button>
+        ${p.checklist && p.checklist.length ? `<button class="rl" data-act="checklist" data-arg="${esc(p.name)}">чеклист</button>` : ""}
       </td>
       <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
         ${p.installed ? "" : "disabled"}
-        onchange="switchPlugin('${esc(p.name)}', this.checked)"><i></i></label></td>`;
+        data-act="switch" data-arg="${esc(p.name)}"><i></i></label></td>`;
     tb.appendChild(tr);
 
     const det = document.createElement("tr");
@@ -283,13 +287,31 @@ async function loadProfiles() {
       form.innerHTML = `<td colspan="4"><div class="detail" data-form="${esc(p.name)}">
         ${inputs}
         <div class="bar" style="margin-top:.3rem">
-          <button class="primary" onclick="installPlugin('${esc(p.name)}', true)">Установить</button>
-          <button onclick="cancelForm('${esc(p.name)}')">Отмена</button>
+          <button class="primary" data-act="install-form" data-arg="${esc(p.name)}">Установить</button>
+          <button data-act="cancel-form" data-arg="${esc(p.name)}">Отмена</button>
         </div></div></td>`;
       tb.appendChild(form);
     }
   }
 }
+
+// Делегирование: значение приходит из data-arg готовой строкой, минуя JS-литерал.
+const ACTIONS = {
+  "install": n => installPlugin(n),
+  "install-form": n => installPlugin(n, true),
+  "uninstall": n => uninstallPlugin(n),
+  "checklist": n => toggleChecklist(n),
+  "cancel-form": n => cancelForm(n),
+  "remove-user": n => removeUser(n),
+};
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (el && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el.dataset.arg);
+});
+document.addEventListener("change", e => {
+  const el = e.target.closest('[data-act="switch"]');
+  if (el) switchPlugin(el.dataset.arg, el.checked);
+});
 
 function toggleChecklist(name) {
   const r = $("#chk-" + name);
@@ -392,7 +414,7 @@ async function loadUsers() {
   for (const u of d.users) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${esc(u.label)}</td><td class="muted"><code class="id">${esc(u.type)} ${esc(u.fp)}</code></td>
-      <td><button class="danger" onclick="removeUser('${esc(u.label)}')">удалить</button></td>`;
+      <td><button class="danger" data-act="remove-user" data-arg="${esc(u.label)}">удалить</button></td>`;
     tb.appendChild(tr);
   }
   if (!d.users.length) tb.innerHTML = `<tr><td colspan="3" class="muted">нет пользователей</td></tr>`;

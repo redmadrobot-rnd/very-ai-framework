@@ -80,7 +80,9 @@ ensure_env_kv SRV_EXPLORE_TRUSTED_CIDRS ""
 if ! grep -q "^SRV_EXPLORE_ADMIN_TOKEN=" "$CFG_DIR/env"; then
   ADMIN_TOKEN="adm_$("$APP_DIR/venv/bin/python" -c 'import secrets;print(secrets.token_urlsafe(32))')"
   printf 'SRV_EXPLORE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN" >> "$CFG_DIR/env"
-  echo "==> админ-токен /admin (сохрани, показывается один раз): $ADMIN_TOKEN"
+  # Значение не печатаем: install.sh штатно гоняет деплой-воркфлоу, а его stdout
+  # уходит в лог GitHub Actions, где токен не замаскировать (он рождён на хосте).
+  echo "==> админ-токен /admin сгенерирован и записан в $CFG_DIR/env"
 fi
 
 [ -f "$STATE_DIR/tokens.json" ] || echo '[]' > "$STATE_DIR/tokens.json"
