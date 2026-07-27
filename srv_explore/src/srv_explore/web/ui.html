@@ -39,12 +39,15 @@
     <div class="card">
       <ol class="steps-num">
         <li><b>Запроси доступ у администратора</b> — отдай ему публичную часть своего
-          SSH-ключа, получишь токен <code>srvx_…</code>.
-          <div class="muted">Ключа нет: <code>ssh-keygen -t ed25519 -f ~/.ssh/srvx -N ""</code></div></li>
+          SSH-ключа, получишь токен <code>srvx_…</code>. Ключа нет — сделай:
+          <div class="cmd"><pre>ssh-keygen -t ed25519 -f ~/.ssh/srvx -N ""</pre>
+            <button class="copy" data-act="copy">копировать</button></div></li>
         <li><b>Подними туннель</b> — сервис слушает только loopback, публичного порта нет.
-          <pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@&lt;host&gt; -i ~/.ssh/srvx</pre></li>
+          <div class="cmd"><pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@&lt;host&gt; -i ~/.ssh/srvx</pre>
+            <button class="copy" data-act="copy">копировать</button></div></li>
         <li><b>Подключи MCP к своему агенту</b> — дальше зовёшь его как обычный скилл.
-          <pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp   --header "Authorization: Bearer srvx_…"</pre></li>
+          <div class="cmd"><pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp   --header "Authorization: Bearer srvx_…"</pre>
+            <button class="copy" data-act="copy">копировать</button></div></li>
         <li><b>Или работай отсюда</b> — вставь токен на вкладке <b>account</b> и спрашивай
           на вкладке <b>explore</b>, без MCP.</li>
       </ol>
@@ -293,9 +296,23 @@ function finishAsk(msg, isErr) {
   $("#askmsg").className = isErr ? "err" : "muted";
 }
 
+// --- копирование команды ---
+async function copyCmd(_arg, btn) {
+  const text = btn.closest(".cmd").querySelector("pre").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {                     // нет clipboard API (старый браузер, не https)
+    const ta = document.createElement("textarea");
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); ta.remove();
+  }
+  btn.textContent = "скопировано";
+  setTimeout(() => { btn.textContent = "копировать"; }, 1400);
+}
+
 // --- делегирование: значения не подставляются в inline-обработчики ---
 const ACTIONS = {
-  login, logout, ask,
+  login, logout, ask, copy: copyCmd,
   refresh: () => api("/app/api/me").then(render).catch(e => alert(e.message)),
   run: i => {
     const d = $("#run-" + i), c = $("#chev-" + i);
@@ -305,7 +322,7 @@ const ACTIONS = {
 };
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
-  if (el && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el.dataset.arg);
+  if (el && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el.dataset.arg, el);
 });
 $("#tok").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
 

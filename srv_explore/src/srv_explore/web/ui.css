@@ -134,8 +134,15 @@ nav.tabs button[aria-selected="true"] { color: var(--tx); border-bottom-color: v
 .steps-num { margin: 0; padding-left: 1.4rem; display: grid; gap: .8rem; }
 .steps-num > li { padding-left: .2rem; }
 .steps-num .muted, .steps-num pre { margin-top: .3rem; font-size: .88rem; }
-.steps-num pre { padding: .55rem .7rem; background: var(--surface2);
+.steps-num pre, .cmd pre { padding: .55rem .7rem; background: var(--surface2);
   border: 1px solid var(--bd); border-radius: 8px; overflow-x: auto; }
+
+/* команда с кнопкой копирования */
+.cmd { position: relative; margin-top: .35rem; }
+.cmd pre { padding-right: 7rem; }
+button.copy { position: absolute; top: .3rem; right: .3rem; padding: .15rem .5rem;
+  font-size: .75rem; color: var(--mut); opacity: .75; }
+.cmd:hover button.copy, button.copy:focus { opacity: 1; color: var(--tx); }
 
 .cols { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
 .cols h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .07em; color: var(--mut); margin: 0 0 .5rem; }
