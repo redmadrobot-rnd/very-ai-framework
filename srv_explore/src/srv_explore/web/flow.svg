@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 296" width="880" height="296" role="img"
+     aria-label="Схема: сервис живёт в systemd на удалённом сервере и слушает только loopback; и админ, и инженер приходят через SSH-туннель с токеном — админ в Admin UI, где выдаёт доступы и включает ресурсы, инженер в MCP-сервер, который под каждый прогон спавнит агента; агент делает только безопасные операции над файлами, логами, docker и БД и возвращает факты. Сервис ставит и обновляет деплой-воркфлоу GitHub Actions.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect fill="#161b22" stroke="#30363d" x="4" y="8" width="150" height="44" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="79" y="30" text-anchor="middle">GitHub Actions</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="79" y="46" text-anchor="middle">deploy workflow</text>
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M158 30 H430 V88"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="292" y="22" text-anchor="middle">ssh · install.sh</text>
+
+  <rect fill="#ffffff08" stroke="#30363d" stroke-dasharray="4 3" x="226" y="64" width="650" height="228" rx="12"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" letter-spacing="0.8" x="238" y="82">REMOTE SERVER</text>
+  <rect fill="#ffffff08" stroke="#30363d" stroke-dasharray="4 3" x="240" y="92" width="230" height="168" rx="10"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" letter-spacing="0.8" x="250" y="110">SYSTEMD SERVICE · ROOT</text>
+
+  <rect fill="#161b22" stroke="#30363d" x="4" y="120" width="108" height="48" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="58" y="142" text-anchor="middle">Admin</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="58" y="158" text-anchor="middle">browser</text>
+
+  <rect fill="#161b22" stroke="#30363d" x="4" y="196" width="108" height="60" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="58" y="218" text-anchor="middle">Engineer</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="58" y="234" text-anchor="middle">Claude Code</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="58" y="248" text-anchor="middle">or browser</text>
+
+  <rect fill="#0f141a" stroke="#30363d" stroke-dasharray="4 3" x="132" y="124" width="84" height="40" rx="8"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="174" y="141" text-anchor="middle">ssh tunnel</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="174" y="155" text-anchor="middle">+ token</text>
+  <rect fill="#0f141a" stroke="#30363d" stroke-dasharray="4 3" x="132" y="206" width="84" height="40" rx="8"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="174" y="223" text-anchor="middle">ssh tunnel</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="174" y="237" text-anchor="middle">+ token</text>
+
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M116 144 H128"/>
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M220 144 H246"/>
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M116 226 H128"/>
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M220 226 H246"/>
+
+  <rect fill="#161b22" stroke="#30363d" x="250" y="120" width="208" height="48" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="354" y="141" text-anchor="middle">Admin UI /admin</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="354" y="158" text-anchor="middle">keys · tokens · plugins</text>
+
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" stroke-dasharray="5 4" d="M290 172 V200"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="302" y="182">grants tokens,</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="302" y="196">enables resources</text>
+
+  <rect fill="#161b22" stroke="#30363d" x="250" y="202" width="208" height="48" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="354" y="223" text-anchor="middle">MCP server /mcp</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="354" y="240" text-anchor="middle">+ engineer page /</text>
+
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M462 226 H516"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="489" y="218" text-anchor="middle">spawn</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="489" y="245" text-anchor="middle">per run</text>
+
+  <rect fill="#161b22" stroke="#2f81f7" x="520" y="202" width="140" height="48" rx="9"/>
+  <text fill="#e6edf3" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" x="590" y="232" text-anchor="middle">Agent</text>
+
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M664 226 H736"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="700" y="218" text-anchor="middle">only safe ops</text>
+
+  <rect fill="#161b22" stroke="#30363d" x="740" y="202" width="132" height="48" rx="9"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="806" y="223" text-anchor="middle">files · logs</text>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="806" y="239" text-anchor="middle">docker · DB</text>
+
+  <path stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#a)" d="M590 258 V278 H58 V262"/>
+  <text fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" x="330" y="273" text-anchor="middle">facts: commands and their output</text>
+</svg>

@@ -36,6 +36,7 @@ WEB = HERE / "web"
 ADMIN_PAGE = WEB / "admin.html"
 UI_PAGE = WEB / "ui.html"
 UI_CSS = WEB / "ui.css"
+FLOW_SVG = WEB / "flow.svg"
 
 
 def public_host() -> str:
@@ -104,6 +105,7 @@ def identify(authorization: str | None, store: TokenStore) -> Identity | None:
 GATE: tuple[tuple[str, str | None], ...] = (
     ("/", None),  # лендинг: оболочка публична, данные за /app/api/*
     ("/ui.css", None),
+    ("/flow.svg", None),  # схема на лендинге
     ("/admin", None),  # оболочка админки — так же
     ("/admin/api/", "admin"),
     ("/app/api/", "engineer"),  # админ проходит тоже: роль старше
@@ -329,12 +331,18 @@ def build_app(store: TokenStore | None = None):
     async def ui_page(request):  # noqa: ARG001
         return _page(UI_PAGE, "<h1>srv-explore</h1><p>ui.html не найден</p>")
 
-    async def ui_css(request):  # noqa: ARG001
+    def _asset(path: Path, media: str, fallback: str = ""):
         try:
-            css = UI_CSS.read_text(encoding="utf-8")
+            body = path.read_text(encoding="utf-8")
         except OSError:
-            css = "/* ui.css не найден */"
-        return Response(css, media_type="text/css; charset=utf-8", headers=NO_STORE)
+            body = fallback
+        return Response(body, media_type=media, headers=NO_STORE)
+
+    async def ui_css(request):  # noqa: ARG001
+        return _asset(UI_CSS, "text/css; charset=utf-8", "/* ui.css не найден */")
+
+    async def ui_flow(request):  # noqa: ARG001
+        return _asset(FLOW_SVG, "image/svg+xml; charset=utf-8", "<svg/>")
 
     # --- /app: кабинет. Кого сюда пускать, решил Gate; тут только рендер по роли ---
     def _who(request) -> Identity:
@@ -504,6 +512,7 @@ def build_app(store: TokenStore | None = None):
         routes=[
             Route("/", ui_page),
             Route("/ui.css", ui_css),
+            Route("/flow.svg", ui_flow),
             Route("/app/api/me", app_me),
             Route("/app/api/ask", app_ask, methods=["POST"]),
             Route("/app/api/ask/{job_id}", app_ask_status),

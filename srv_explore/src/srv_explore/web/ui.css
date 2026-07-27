@@ -126,6 +126,13 @@ nav.tabs button[aria-selected="true"] { color: var(--tx); border-bottom-color: v
 .hero em { color: var(--acc); font-style: normal; }
 .lead { color: var(--mut); max-width: 62ch; margin: 0 0 1.4rem; }
 .flow { width: 100%; height: auto; margin: .4rem 0 1.6rem; }
+/* quick start: нумерованные шаги с пояснением и командой */
+.steps-num { margin: 0; padding-left: 1.4rem; display: grid; gap: .8rem; }
+.steps-num > li { padding-left: .2rem; }
+.steps-num .muted, .steps-num pre { margin-top: .3rem; font-size: .88rem; }
+.steps-num pre { padding: .55rem .7rem; background: var(--surface2);
+  border: 1px solid var(--bd); border-radius: 8px; overflow-x: auto; }
+
 .cols { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
 .cols h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .07em; color: var(--mut); margin: 0 0 .5rem; }
 .cols ul { margin: 0; padding-left: 1.1rem; }
