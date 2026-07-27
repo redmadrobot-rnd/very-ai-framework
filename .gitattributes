@@ -1,0 +1,8 @@
+# Правки с Windows иначе протаскивают CRLF в репозиторий. Для bash-скриптов и
+# systemd-юнитов это не косметика: `set -euo pipefail\r` на хосте падает с
+# "invalid option name", и установка обрывается на девятой строке.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
