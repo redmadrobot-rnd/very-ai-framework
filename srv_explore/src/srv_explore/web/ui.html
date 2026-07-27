@@ -14,9 +14,9 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" id="tab-about" aria-selected="true" data-tab="about">Что это</button>
-    <button role="tab" id="tab-me" aria-selected="false" data-tab="me">Мой доступ</button>
-    <button role="tab" id="tab-ask" aria-selected="false" data-tab="ask">Спросить сервер</button>
+    <button role="tab" id="tab-about" aria-selected="true" data-tab="about">main</button>
+    <button role="tab" id="tab-me" aria-selected="false" data-tab="me">account</button>
+    <button role="tab" id="tab-ask" aria-selected="false" data-tab="ask">explore</button>
   </nav>
 
   <!-- ── Что это ─────────────────────────────────────────────── -->
@@ -45,8 +45,8 @@
           <pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@&lt;host&gt; -i ~/.ssh/srvx</pre></li>
         <li><b>Подключи MCP к своему агенту</b> — дальше зовёшь его как обычный скилл.
           <pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp   --header "Authorization: Bearer srvx_…"</pre></li>
-        <li><b>Или работай отсюда</b> — вставь токен во вкладке «Мой доступ» и спрашивай
-          на вкладке «Спросить сервер», без MCP.</li>
+        <li><b>Или работай отсюда</b> — вставь токен на вкладке <b>account</b> и спрашивай
+          на вкладке <b>explore</b>, без MCP.</li>
       </ol>
     </div>
 
@@ -107,8 +107,7 @@
   <!-- ── Спросить сервер ─────────────────────────────────────── -->
   <section id="pane-ask" hidden>
     <div id="ask-gate" class="card">
-      <p style="margin:0">Нужен токен доступа — вставь его во вкладке
-        <b>«Мой доступ»</b>.</p>
+      <p style="margin:0">Нужен токен доступа — вставь его на вкладке <b>account</b>.</p>
     </div>
     <div id="ask" hidden>
       <div class="card">
