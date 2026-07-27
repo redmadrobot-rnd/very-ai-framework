@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
-HERE = Path(__file__).resolve().parents[1] / "srv_explore"
-PAGES = [HERE / "admin.html", HERE / "ui.html"]
+WEB = (
+    Path(__file__).resolve().parents[1] / "srv_explore" / "src" / "srv_explore" / "web"
+)
+PAGES = [WEB / "admin.html", WEB / "ui.html"]
 
 
 @pytest.fixture(params=PAGES, ids=lambda p: p.name)

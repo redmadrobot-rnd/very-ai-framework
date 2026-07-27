@@ -235,7 +235,7 @@ FIELDS = [
 
 ```bash
 # 1. положить файл на сервер и перезапустить сервис
-scp profiles/clickhouse.py root@host:/opt/srv-explore/srv_explore/profiles/
+scp src/srv_explore/profiles/clickhouse.py root@host:/opt/srv-explore/srv_explore/profiles/
 ssh root@host systemctl restart srv-explore
 
 # 2. плагин должен появиться в списке со своей формой

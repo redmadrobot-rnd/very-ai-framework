@@ -31,9 +31,10 @@ def _now() -> str:
 
 
 HERE = Path(__file__).resolve().parent
-ADMIN_PAGE = HERE / "admin.html"
-UI_PAGE = HERE / "ui.html"
-UI_CSS = HERE / "ui.css"
+WEB = HERE / "web"
+ADMIN_PAGE = WEB / "admin.html"
+UI_PAGE = WEB / "ui.html"
+UI_CSS = WEB / "ui.css"
 # Оболочки страниц отдаются без токена, данные за ними — только по токену.
 PUBLIC_PATHS = frozenset({"/", "/ui.css"})
 

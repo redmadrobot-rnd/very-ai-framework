@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # каталог бандла (srv_explore/)
+PKG="$SRC/src/srv_explore"                            # сам пакет (src-раскладка)
 APP_DIR=/opt/srv-explore
 CFG_DIR=/etc/srv-explore
 STATE_DIR=/var/lib/srv-explore
@@ -31,9 +32,10 @@ install -d "$APP_DIR"
 install -d -m 0750 "$CFG_DIR"
 install -d -m 0750 "$STATE_DIR"
 
-# 3. код бандла
+# 3. код: на хост уезжает только пакет, бандл (install.sh, systemd, requirements)
+# остаётся в чекауте
 rm -rf "$APP_DIR/srv_explore"
-cp -r "$SRC" "$APP_DIR/srv_explore"
+cp -r "$PKG" "$APP_DIR/srv_explore"
 find "$APP_DIR/srv_explore" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 # 4. venv + зависимости
@@ -48,7 +50,7 @@ if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
 fi
 [ -x "$APP_DIR/venv/bin/python" ] || python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/srv_explore/requirements.txt"
+"$APP_DIR/venv/bin/pip" install --quiet -r "$SRC/requirements.txt"
 # агент (srvx-agent) должен уметь читать/исполнять код и venv из песочницы
 chmod -R a+rX "$APP_DIR"
 
@@ -152,7 +154,7 @@ EOF
 chmod 0644 "$CFG_DIR/tinyproxy.conf"
 
 if command -v tinyproxy >/dev/null 2>&1; then
-  install -m 0644 "$APP_DIR/srv_explore/systemd/srv-explore-proxy.service" \
+  install -m 0644 "$SRC/systemd/srv-explore-proxy.service" \
     /etc/systemd/system/srv-explore-proxy.service
   systemctl daemon-reload
   systemctl enable srv-explore-proxy.service
@@ -160,7 +162,7 @@ if command -v tinyproxy >/dev/null 2>&1; then
 fi
 
 # 7. systemd-юнит
-install -m 0644 "$APP_DIR/srv_explore/systemd/srv-explore.service" /etc/systemd/system/srv-explore.service
+install -m 0644 "$SRC/systemd/srv-explore.service" /etc/systemd/system/srv-explore.service
 systemctl daemon-reload
 systemctl enable srv-explore.service
 systemctl restart srv-explore.service

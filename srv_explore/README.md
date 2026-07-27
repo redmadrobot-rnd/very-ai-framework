@@ -171,11 +171,16 @@ flowchart TB
   MCP --> ST
 ```
 
-| Файл | Роль |
+Каталог: код — в `src/srv_explore/` (пакет, он же уезжает на хост), рядом с ним
+`install.sh`, `systemd/`, `requirements.txt` и эти доки — они нужны при установке,
+но в рантайме не участвуют.
+
+| Файл в `src/srv_explore/` | Роль |
 |---|---|
 | `mcp_server.py` | MCP-инструменты, `/admin`, `/` (кабинет инженера), реестр задач |
 | `sandbox.py` | запуск кода агента без прав (`systemd-run`) |
 | `agent_worker.py` | сам агент: SDK + hook на каждую Bash-команду |
+| `agent_prompt.md` | системный промпт агента |
 | `guard.py` | гигиена команд (метасимволы, `/dev/*`) |
 | `plugin_api.py` | контракт плагина — см. [PLUGINS.md](PLUGINS.md) |
 | `provision.py` | раннер установки плагина, вычистка секретов |
@@ -183,8 +188,7 @@ flowchart TB
 | `profiles/*.py` | сами плагины |
 | `token_store.py`, `tunnel_keys.py` | токены инженеров (на диске только sha256), ключи туннеля |
 | `backstop.py` | пробы харденинга (чипы FileSystem / Network) |
-| `admin.html`, `ui.html`, `ui.css` | админка, страница инженера, общие стили |
-| `install.sh`, `systemd/` | установка на хост |
+| `web/` | `admin.html`, `ui.html`, `ui.css` — админка, страница инженера, общие стили |
 
 ---
 
