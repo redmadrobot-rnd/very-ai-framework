@@ -2,31 +2,36 @@
 
 **Инженер спрашивает сервер словами и получает факты — не имея доступа к серверу.**
 
-На хосте живёт readonly-агент за одним MCP-инструментом. Инженер из своего Claude Code
-шлёт задачу («почему сервис отдаёт 502?»), агент читает хост — файлы, логи, код,
+На удалённом сервере живёт readonly-агент за одним MCP-инструментом. Инженер из своего Claude Code
+шлёт задачу («почему сервис отдаёт 502?»), агент читает сервер — файлы, логи, код,
 контейнеры, БД — и возвращает **сырые факты**: какие команды выполнил и что они показали.
 Изменить он ничего не может: это гарантирует не вежливость модели, а недоступность
 ресурсов на запись.
 
 ```mermaid
 flowchart LR
-  ADMIN["Админ<br/>браузер"]
-  DEV["Разработчик<br/>Claude Code или браузер"]
-  subgraph host["Хост"]
-    subgraph svc["Сервис srv-explore · root"]
-      UI["Админка /admin<br/>юзеры · ключи · плагины"]
-      MCPS["MCP-сервер /mcp<br/>+ кабинет /"]
+  CI["GitHub Actions<br/>deploy workflow"]
+  ADMIN["Admin<br/>browser"]
+  ENG["Engineer<br/>Claude Code or browser"]
+  subgraph server["Remote server"]
+    subgraph svc["systemd service · root"]
+      UI["Admin UI /admin<br/>keys · tokens · plugins"]
+      MCPS["MCP server /mcp<br/>+ engineer page /"]
     end
-    AG["Агент<br/>песочница без прав"]
-    RES[("логи · файлы · docker · БД")]
+    AG["Agent"]
+    RES[("files · logs · docker · DB")]
   end
-  ADMIN -->|"админ-токен"| UI
-  DEV -->|"SSH-туннель + токен<br/>srv_explore(task)"| MCPS
-  UI -.->|"выдаёт токены и ключи,<br/>включает ресурсы"| MCPS
-  MCPS -->|"спавн одноразовой песочницы"| AG
-  AG -->|"только чтение"| RES
-  AG -->|факты| DEV
+  CI -->|"ssh · install.sh"| svc
+  ADMIN -->|"ssh tunnel + admin token"| UI
+  ENG -->|"ssh tunnel + token<br/>srv_explore(task)"| MCPS
+  UI -.->|"grants tokens,<br/>enables resources"| MCPS
+  MCPS -->|"spawn per run"| AG
+  AG -->|"only safe ops"| RES
+  AG -->|facts| ENG
 ```
+
+Сервис слушает только loopback: и инженер, и админ ходят через SSH-туннель, публичного
+порта нет. Ставится и обновляется деплой-воркфлоу (`install.sh` + systemd-юнит).
 
 Ставится **отдельно**, ни от чего в основном проекте не зависит.
 
@@ -46,7 +51,7 @@ flowchart LR
 `systemctl status`, `df`, `ps`.
 
 **Чего не умеет и не сможет:** писать в файлы · менять/удалять данные в БД ·
-рестартовать сервисы и контейнеры · `sudo` · перезагружать хост · слать данные наружу.
+рестартовать сервисы и контейнеры · `sudo` · перезагружать сервер · слать данные наружу.
 
 ---
 
@@ -160,30 +165,30 @@ srv_explore_status("job_ab12cd")
 
 ```mermaid
 flowchart TB
-  subgraph host["Хост"]
-    subgraph svc["Сервис srv-explore · root"]
-      MCP["mcp_server.py<br/>MCP + /admin"]
-      PROV["provision.py<br/>установка плагинов"]
-      ST[("StateDir<br/>токены · плагины · креды")]
+  subgraph server["Remote server"]
+    subgraph svc["systemd service · root"]
+      MCP["mcp_server.py<br/>MCP · /admin · /"]
+      PROV["provision.py<br/>plugin install"]
+      ST[("StateDir<br/>tokens · plugins · creds")]
     end
-    subgraph box["Песочница · srvx-agent, без прав"]
+    subgraph box["Sandbox · srvx-agent, no privileges"]
       W["agent_worker.py<br/>Claude Agent SDK"]
-      G["guard.py<br/>гигиена команд"]
+      G["guard.py<br/>command hygiene"]
     end
     PX["docker-socket-proxy<br/>POST=0"]
-    TP["tinyproxy<br/>доменный allowlist"]
-    RES[("файлы · логи · docker · БД")]
+    TP["tinyproxy<br/>domain allowlist"]
+    RES[("files · logs · docker · DB")]
   end
-  MCP -->|"systemd-run --uid<br/>RO-FS · egress-firewall"| W
-  MCP -.->|"креды включённых<br/>плагинов"| W
+  MCP -->|"systemd-run --uid<br/>RO-FS · egress firewall"| W
+  MCP -.->|"creds of enabled<br/>plugins"| W
   W --> G --> RES
   W -->|docker| PX --> RES
-  W -->|"API модели"| TP
+  W -->|"model API"| TP
   PROV --> ST
   MCP --> ST
 ```
 
-Каталог: код — в `src/srv_explore/` (пакет, он же уезжает на хост), рядом с ним
+Каталог: код — в `src/srv_explore/` (пакет, он же уезжает на сервер), рядом с ним
 `install.sh`, `systemd/`, `requirements.txt` и эти доки — они нужны при установке,
 но в рантайме не участвуют.
 
@@ -257,7 +262,7 @@ flowchart LR
   namespace для песочницы. Link-local (`169.254.0.0/16`) при этом **закрыт**: там
   живёт cloud metadata и ключи инстанса.
 - **Секреты в world-readable файлах** (`.env` с правами 644) агент прочитает — это
-  неизбежное свойство «читателя хоста».
+  неизбежное свойство «читателя сервера».
 - **Инженер с токеном равен агенту по доступу.** Креды включённых плагинов и токен
   модели лежат в окружении агента; гард режет очевидные способы их напечатать
   (`env`, `printenv`, `/proc/*/environ`), но это гигиена, а не барьер — достаточно
