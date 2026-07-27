@@ -16,7 +16,7 @@
       <span id="chip-net" class="chip"><span class="dotc">●</span>Network: <b>…</b></span>
     </span>
   </header>
-  <p class="sub">Управление доступом, история сессий и аудит — без SSH к серверу.
+  <p class="sub">Управление доступом и плагинами — без SSH к серверу.
     Спросить сервер — на <a href="/">странице агента</a>, тем же админ-токеном.</p>
 
   <div class="card bar">
@@ -43,6 +43,15 @@
     <h2>Плагины <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— Install настраивает доступ, тумблер выдаёт его агенту</span></h2>
     <div class="card tbl-card">
       <table id="plugtbl"><thead><tr><th>плагин</th><th>что даёт</th><th>установка</th><th>агенту</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <h2>Настройки <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— куда агенту можно наружу; применяется сразу</span></h2>
+    <div class="card">
+      <div id="settings"></div>
+      <div class="bar" style="margin-top:.3rem">
+        <button class="primary" data-act="save-settings">Применить</button>
+        <span id="setmsg" class="muted"></span>
+      </div>
     </div>
 
     <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 100 прогонов, в памяти сервиса</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
@@ -88,6 +97,7 @@ async function boot() {
     $("#authmsg").className = "muted";
     loadSecurity();
     loadPlugins();
+    loadSettings();
     loadRuns();
   } catch (e) {
     $("#app").style.display = "none";
@@ -132,6 +142,18 @@ function checklistHtml(items) {
   ).join("") + `</div>`;
 }
 
+// Одна форма на два места: описание полей приходит с сервера (plugin_api.field).
+function fieldsHtml(fields, values) {
+  return (fields || []).map(f => `
+    <label style="display:block;margin-bottom:.5rem">
+      <span class="muted">${esc(f.label)}${f.required === false ? " (необязательно)" : ""}</span><br>
+      <input type="${f.secret ? "password" : "text"}" data-field="${esc(f.name)}"
+             placeholder="${esc(f.placeholder || "")}" style="width:100%;max-width:520px"
+             value="${esc((values || {})[f.name] || "")}">
+      ${f.hint ? `<span class="muted" style="font-size:.8rem">${esc(f.hint)}</span>` : ""}
+    </label>`).join("");
+}
+
 async function loadPlugins() {
   const d = await (await api("/admin/api/plugins")).json();
   const tb = $("#plugtbl tbody"); tb.innerHTML = "";
@@ -164,15 +186,8 @@ async function loadPlugins() {
     if (p.fields && p.fields.length) {          // форму описывает сам плагин
       const form = document.createElement("tr");
       form.className = "drow"; form.id = "form-" + p.name; form.style.display = "none";
-      const inputs = p.fields.map(f => `
-        <label style="display:block;margin-bottom:.5rem">
-          <span class="muted">${esc(f.label)}${f.required === false ? " (необязательно)" : ""}</span><br>
-          <input type="${f.secret ? "password" : "text"}" data-field="${esc(f.name)}"
-                 placeholder="${esc(f.placeholder || "")}" style="width:100%;max-width:520px">
-          ${f.hint ? `<span class="muted" style="font-size:.8rem">${esc(f.hint)}</span>` : ""}
-        </label>`).join("");
       form.innerHTML = `<td colspan="4"><div class="detail" data-form="${esc(p.name)}">
-        ${inputs}
+        ${fieldsHtml(p.fields)}
         <div class="bar" style="margin-top:.3rem">
           <button class="primary" data-act="install-form" data-arg="${esc(p.name)}">Установить</button>
           <button data-act="cancel-form" data-arg="${esc(p.name)}">Отмена</button>
@@ -190,6 +205,7 @@ const ACTIONS = {
   "checklist": n => toggleChecklist(n),
   "cancel-form": n => cancelForm(n),
   "remove-user": n => removeUser(n),
+  "save-settings": () => saveSettings(),
 };
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
@@ -260,6 +276,27 @@ async function switchPlugin(name, on) {
 
 function cancelForm(name) {
   const f = $("#form-" + name); if (f) f.style.display = "none";
+}
+
+async function loadSettings() {
+  const d = await (await api("/admin/api/settings")).json();
+  $("#settings").innerHTML = fieldsHtml(d.fields, d.values);
+}
+
+async function saveSettings() {
+  const values = {};
+  $("#settings").querySelectorAll("input[data-field]").forEach(i => values[i.dataset.field] = i.value.trim());
+  const msg = $("#setmsg");
+  msg.className = "muted"; msg.textContent = "применяю…";
+  let r, d;
+  try {
+    r = await api("/admin/api/settings", { method: "POST", body: JSON.stringify({ values }) });
+    d = await r.json();
+  } catch (e) { msg.className = "err"; msg.textContent = e.message; return; }
+  if (!r.ok) { msg.className = "err"; msg.textContent = d.error || "ошибка"; return; }
+  msg.className = "muted";
+  msg.textContent = "сохранено · прокси: " + (d.applied || "") + " · подсети — со следующего прогона агента";
+  $("#settings").innerHTML = fieldsHtml(d.fields, d.values);
 }
 
 async function loadUsers() {

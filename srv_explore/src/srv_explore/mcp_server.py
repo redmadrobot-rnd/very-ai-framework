@@ -23,7 +23,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, plugin_store, provision, sandbox, tunnel_keys
+from srv_explore import (
+    backstop,
+    plugin_store,
+    provision,
+    sandbox,
+    settings,
+    tunnel_keys,
+)
 from srv_explore.token_store import TokenStore
 
 
@@ -172,6 +179,10 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     env["SRV_EXPLORE_RESOURCES_OFF"] = "; ".join(
         f"{pid} ({desc})" for pid, desc in sorted(reg.items()) if pid not in active
     )
+    # что открыл админ в настройках: без этого агент считает, что сети нет вообще
+    env["SRV_EXPLORE_EGRESS"] = ", ".join(
+        d for d in settings.egress_domains() if d != settings.MODEL_DOMAIN
+    )
     worker = [sys.executable, "-m", "srv_explore.agent_worker"]
     if steps is None:
         steps = []
@@ -284,8 +295,9 @@ def build_app(store: TokenStore | None = None):
         20 секунд до нескольких минут, потолок — 10 минут).
 
         task — цель словами, без готовых команд («почему сервис отдаёт 502?»).
-        Агент только читает: изменить файлы, БД, контейнеры или сходить в интернет
-        он не может — просить его об этом бесполезно.
+        Агент только смотрит: изменить файлы, БД или контейнеры он не может, наружу
+        ходит только по адресам, которые открыл администратор — просить его о
+        большем бесполезно.
 
         В ответе resources — к чему у него сейчас есть доступ помимо файлов и логов.
         """
@@ -434,6 +446,24 @@ def build_app(store: TokenStore | None = None):
             }
         )
 
+    async def admin_settings(request):
+        """Объявленные ручки + значения. Правка применяется сразу: домены — через
+        пересборку allowlist прокси, подсети — со следующего прогона агента."""
+        if request.method == "POST":
+            body = await request.json()
+            values = body.get("values") or {}
+            err = settings.validate(values)
+            if err:
+                return JSONResponse({"error": err}, status_code=400)
+            saved = settings.save(values)
+            # изменения границы должны оставлять след вне UI
+            print(f"settings: {saved}", file=sys.stderr, flush=True)
+            applied = await asyncio.to_thread(settings.apply_egress)
+            return JSONResponse(
+                {"fields": settings.FIELDS, "values": saved, "applied": applied}
+            )
+        return JSONResponse({"fields": settings.FIELDS, "values": settings.load()})
+
     def _plugins_payload():
         """Сохранённое состояние: установлен (+чеклист) и включён. Живых проб нет."""
         enabled = plugin_store.load()
@@ -522,6 +552,7 @@ def build_app(store: TokenStore | None = None):
             Route("/admin/api/runs", admin_runs),
             Route("/admin/api/security", admin_security),
             Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
+            Route("/admin/api/settings", admin_settings, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(Gate)],

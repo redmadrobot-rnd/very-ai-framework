@@ -33,8 +33,12 @@ _NO_PROXY = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
 
 def _ip_allow() -> str:
-    trusted = os.environ.get("SRV_EXPLORE_TRUSTED_CIDRS", "").strip()
-    return _ALLOW_BASE + (" " + trusted if trusted else "")
+    """База + что открыл деплой (env) и админ (настройки). Читается на каждом спавне,
+    поэтому правка в админке действует со следующего прогона, без рестарта."""
+    from srv_explore import settings
+
+    extra = " ".join(settings.egress_cidrs())
+    return _ALLOW_BASE + (" " + extra if extra else "")
 
 
 _PROPS = [

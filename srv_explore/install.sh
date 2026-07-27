@@ -132,16 +132,17 @@ if ! command -v tinyproxy >/dev/null 2>&1; then
 fi
 systemctl disable --now tinyproxy 2>/dev/null || true   # стоковый сервис на 8888 — не нужен
 
-# allowlist доменов: api.anthropic.com (модель) + SRV_EXPLORE_TRUSTED_DOMAINS из env.
-# Каждый домен — extended-regex по хосту: сам домен и его поддомены.
+# База allowlist — плоский список доменов из env (деплойный уровень). Итоговый файл
+# фильтра собирает сервис: база + домены, заданные в админке (settings.py), поэтому
+# деплой не затирает настройки, а настройки не затирают деплой.
 TRUSTED_DOMAINS="$(grep -E '^SRV_EXPLORE_TRUSTED_DOMAINS=' "$CFG_DIR/env" | cut -d= -f2- | tr ',' ' ' || true)"
 {
   for d in api.anthropic.com $TRUSTED_DOMAINS; do
     [ -n "$d" ] || continue
-    printf '(^|\\.)%s$\n' "$(printf '%s' "$d" | sed 's/\./\\./g')"
+    printf '%s\n' "$d"
   done
-} > "$CFG_DIR/proxy-allow"
-chmod 0644 "$CFG_DIR/proxy-allow"
+} > "$CFG_DIR/proxy-allow.base"
+chmod 0644 "$CFG_DIR/proxy-allow.base"
 
 cat > "$CFG_DIR/tinyproxy.conf" <<EOF
 Port 3128
@@ -164,7 +165,9 @@ if command -v tinyproxy >/dev/null 2>&1; then
     /etc/systemd/system/srv-explore-proxy.service
   systemctl daemon-reload
   systemctl enable srv-explore-proxy.service
-  systemctl restart srv-explore-proxy.service
+  # итоговый фильтр = база + домены из настроек админки; он же рестартнёт прокси
+  SRV_EXPLORE_PLUGIN_STATE="$STATE_DIR/plugins.json" \
+    PYTHONPATH="$APP_DIR" "$APP_DIR/venv/bin/python" -m srv_explore.settings
 fi
 
 # 7. systemd-юнит
