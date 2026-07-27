@@ -41,13 +41,13 @@
         <li><b>Запроси доступ у администратора</b> — отдай ему публичную часть своего
           SSH-ключа, получишь токен <code>srvx_…</code>. Ключа нет — сделай:
           <div class="cmd"><pre>ssh-keygen -t ed25519 -f ~/.ssh/srvx -N ""</pre>
-            <button class="copy" data-act="copy">копировать</button></div></li>
+            <button class="copy" data-act="copy" title="Копировать" aria-label="Копировать команду"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button></div></li>
         <li><b>Подними туннель</b> — сервис слушает только loopback, публичного порта нет.
           <div class="cmd"><pre>ssh -N -L 8765:localhost:8765 srvx-tunnel@&lt;host&gt; -i ~/.ssh/srvx</pre>
-            <button class="copy" data-act="copy">копировать</button></div></li>
+            <button class="copy" data-act="copy" title="Копировать" aria-label="Копировать команду"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button></div></li>
         <li><b>Подключи MCP к своему агенту</b> — дальше зовёшь его как обычный скилл.
           <div class="cmd"><pre>claude mcp add --transport http srv-explore http://localhost:8765/mcp   --header "Authorization: Bearer srvx_…"</pre>
-            <button class="copy" data-act="copy">копировать</button></div></li>
+            <button class="copy" data-act="copy" title="Копировать" aria-label="Копировать команду"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></button></div></li>
         <li><b>Или работай отсюда</b> — вставь токен на вкладке <b>account</b> и спрашивай
           на вкладке <b>explore</b>, без MCP.</li>
       </ol>
@@ -306,8 +306,9 @@ async function copyCmd(_arg, btn) {
     ta.value = text; document.body.appendChild(ta); ta.select();
     document.execCommand("copy"); ta.remove();
   }
-  btn.textContent = "скопировано";
-  setTimeout(() => { btn.textContent = "копировать"; }, 1400);
+  btn.classList.add("done");                       // галочка вместо иконки — в CSS
+  btn.title = "Скопировано";
+  setTimeout(() => { btn.classList.remove("done"); btn.title = "Копировать"; }, 1400);
 }
 
 // --- делегирование: значения не подставляются в inline-обработчики ---
