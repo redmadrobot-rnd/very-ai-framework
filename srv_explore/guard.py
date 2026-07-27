@@ -16,7 +16,18 @@ from __future__ import annotations
 import shlex
 
 # Метасимволы записи/подстановки/цепочки; пайп (|) разрешён (read-пайплайны).
-DANGEROUS = ["`", "$(", ">", "<", ";", "&", "\n", "\r"]
+# Причина отказа адресная: агент её читает и должен понять, ЧТО менять, иначе
+# повторяет ту же форму команды раз за разом.
+DANGEROUS = {
+    "\n": "перевод строки внутри команды — собери всё в одну строку",
+    "\r": "перевод строки внутри команды — собери всё в одну строку",
+    ">": "редирект: писать нельзя, и для отбрасывания stderr он не нужен",
+    "<": "редирект: передай файл аргументом, а не через <",
+    ";": "цепочка команд — подавай по одной за раз",
+    "&": "цепочка или фон — подавай команды по одной за раз",
+    "`": "подстановка команды — посчитай значение отдельным шагом",
+    "$(": "подстановка команды — посчитай значение отдельным шагом",
+}
 SAFE_DEV = {"/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty"}
 # Дамп окружения. Гигиена, а не барьер: в env агента лежат токен модели и креды
 # плагинов, и печатать их по первой просьбе не надо. Обойти можно (см. README).
@@ -33,9 +44,9 @@ def forbidden_path(tok: str) -> bool:
 
 
 def check_command_string(command: str) -> tuple[bool, str]:
-    for m in DANGEROUS:
+    for m, why in DANGEROUS.items():
         if m in command:
-            return False, f"метасимвол {m!r}: запись/подстановка/цепочка — read-only"
+            return False, why
     for stage in command.split("|"):
         stage = stage.strip()
         if not stage:
@@ -45,8 +56,14 @@ def check_command_string(command: str) -> tuple[bool, str]:
         except ValueError as e:
             return False, f"не удалось разобрать команду: {e}"
         if argv and argv[0] in DUMP_ENV:
-            return False, f"{argv[0]}: в окружении креды, печатать его нельзя"
+            return False, (
+                f"{argv[0]}: в окружении креды, читать его нельзя — подставляй "
+                'переменную как "$ИМЯ", не разглядывая значение'
+            )
         for tok in argv:
             if forbidden_path(tok):
-                return False, f"чтение спецфайла {tok} запрещено (устройство/поток)"
+                return False, (
+                    f"{tok}: спецфайл (устройство, поток, окружение) — "
+                    "бери нужное обычными утилитами"
+                )
     return True, "read-only ok"
