@@ -224,6 +224,12 @@ document.querySelector("nav.tabs").addEventListener("click", e => {
 async function login() {
   const v = $("#tok").value.trim();
   if (!v) return;
+  if (v.startsWith("adm_")) {
+    $("#authmsg").textContent = "это админ-токен, он только для /admin — тут нужен "
+      + "инженерный srvx_…";
+    $("#authmsg").className = "err";
+    return;
+  }
   sessionStorage.setItem("srvxtok", v);
   $("#authmsg").textContent = "проверяю…";
   $("#authmsg").className = "muted";
