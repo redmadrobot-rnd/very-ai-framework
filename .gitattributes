@@ -1,8 +1,21 @@
 # Правки с Windows иначе протаскивают CRLF в репозиторий. Для bash-скриптов и
 # systemd-юнитов это не косметика: `set -euo pipefail\r` на хосте падает с
 # "invalid option name", и установка обрывается на девятой строке.
+#
+# text=auto — git сам отличает текст от двоичного (по NUL-байтам); eol=lf держит
+# LF и в репозитории, и в рабочей копии. Расширения ниже помечены явно, чтобы
+# автоопределение не решало судьбу картинок и архивов.
 * text=auto eol=lf
 
 *.png binary
 *.jpg binary
+*.jpeg binary
+*.gif binary
 *.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.woff binary
+*.woff2 binary
