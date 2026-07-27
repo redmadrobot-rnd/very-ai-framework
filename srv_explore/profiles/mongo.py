@@ -49,13 +49,20 @@ def _eval(ctx, dsn: str, body: str):
     )
 
 
+def _mongosh_works(ctx) -> bool:
+    """Именно работоспособность, а не наличие файла: полуустановленный tarball
+    оставляет бинарь, который не запускается."""
+    rc, _, _ = ctx.sh(["mongosh", "--version"], timeout=20)
+    return rc == 0
+
+
 def _ensure_mongosh(ctx) -> tuple[bool, str]:
     """mongosh нет в стандартных репах Ubuntu: сначала apt, иначе — официальный
     tarball в /usr/local (без правки apt-источников хоста)."""
-    if ctx.which("mongosh"):
+    if _mongosh_works(ctx):
         return True, "уже установлен"
     ok, _ = ctx.apt(PACKAGES)
-    if ok and ctx.which("mongosh"):
+    if ok and _mongosh_works(ctx):
         return True, "установлен из apt"
 
     url = (
@@ -74,7 +81,7 @@ def _ensure_mongosh(ctx) -> tuple[bool, str]:
         ],
         timeout=300,
     )
-    if rc == 0 and ctx.which("mongosh"):
+    if rc == 0 and _mongosh_works(ctx):
         return True, f"tarball {MONGOSH_VERSION} → {MONGOSH_BIN}"
     return False, (err.strip()[:180] or "не удалось поставить mongosh")
 

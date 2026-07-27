@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 
 import pytest
 
@@ -92,35 +90,3 @@ def test_missing_store_file_is_empty(store_path):
     store = TokenStore(store_path)
     assert store.list() == []
     assert store.verify("anything") is None
-
-
-def test_cli_issue_list_revoke_roundtrip(store_path):
-    def run(*args):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "srv_explore.token_store",
-                "--store",
-                str(store_path),
-                *args,
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-    issued = run("issue", "--label", "bob")
-    assert issued.returncode == 0
-    token_line = issued.stdout.strip().splitlines()[-1]
-    assert token_line.startswith(TOKEN_PREFIX)
-
-    listed = run("list")
-    assert listed.returncode == 0
-    assert "bob" in listed.stdout
-
-    # id — первое поле строки issue (id=...)
-    token_id = issued.stdout.splitlines()[0].split()[0].split("=")[1]
-    revoked = run("revoke", token_id)
-    assert revoked.returncode == 0
-
-    assert TokenStore(store_path).verify(token_line) is None

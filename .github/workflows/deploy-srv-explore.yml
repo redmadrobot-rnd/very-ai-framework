@@ -45,18 +45,17 @@ jobs:
       - name: Install + inject model auth + restart
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         env:
-          SRV_EXPLORE_ENV: ${{ inputs.environment }}
           REPO_DIR: /srv/deploy/${{ github.event.repository.name }}/srv-explore
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: SRV_EXPLORE_ENV,REPO_DIR,CLAUDE_CODE_OAUTH_TOKEN
+          envs: REPO_DIR,CLAUDE_CODE_OAUTH_TOKEN
           script: |
             set -euo pipefail
             SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-            $SUDO env SRV_EXPLORE_ENV="$SRV_EXPLORE_ENV" bash "$REPO_DIR/srv_explore/install.sh"
+            $SUDO bash "$REPO_DIR/srv_explore/install.sh"
             $SUDO sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' /etc/srv-explore/env
             printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" | $SUDO tee -a /etc/srv-explore/env >/dev/null
             $SUDO systemctl restart srv-explore.service

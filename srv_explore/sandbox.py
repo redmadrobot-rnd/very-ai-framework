@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-AGENT_USER = os.environ.get("SRV_EXPLORE_AGENT_USER", "srvx-agent")
+AGENT_USER = "srvx-agent"  # заводит install.sh
 MAX_SEC = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", "600")  # анти-подвисание
 PROXY = os.environ.get("SRV_EXPLORE_PROXY", "http://127.0.0.1:3128")
 # каталог-родитель пакета srv_explore — чтобы `python -m srv_explore.*` в песочнице
@@ -63,6 +63,12 @@ def available() -> bool:
     return shutil.which("systemd-run") is not None and os.geteuid() == 0
 
 
+def _quote(value) -> str:
+    """Значение для systemd EnvironmentFile: в кавычках, с экранированием."""
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def run(
     args,
     input_text: str | None = None,
@@ -76,42 +82,55 @@ def run(
     по RuntimeMaxSec).
     """
     env = {"HOME": "/tmp", "PYTHONPATH": _PKG_PARENT, **_PROXY_ENV, **(extra_env or {})}
-    cmd = [
-        "systemd-run",
-        "--pipe",
-        "--quiet",
-        "--collect",
-        "--wait",
-        f"--uid={AGENT_USER}",
-    ]
-    for p in _PROPS:
-        cmd += ["-p", p]
-    cmd += ["-p", f"IPAddressAllow={_ip_allow()}"]
-    for k, v in env.items():
-        cmd += [f"--setenv={k}={v}"]
-    cmd += list(args)
+    # env уходит файлом 0600, а не через --setenv: argv виден в ps любому на хосте,
+    # а здесь и токен модели, и DSN включённых плагинов.
+    fd, envfile = tempfile.mkstemp(prefix="srvx-env-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for k, v in env.items():
+                f.write(f"{k}={_quote(v)}\n")
+        os.chmod(envfile, 0o600)
 
-    if on_line is None:
-        p = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
-        return p.returncode, p.stdout, p.stderr
+        cmd = [
+            "systemd-run",
+            "--pipe",
+            "--quiet",
+            "--collect",
+            "--wait",
+            f"--uid={AGENT_USER}",
+        ]
+        for p in _PROPS:
+            cmd += ["-p", p]
+        cmd += ["-p", f"IPAddressAllow={_ip_allow()}"]
+        cmd += ["-p", f"EnvironmentFile={envfile}"]
+        cmd += list(args)
 
-    # stderr — во временный файл: иначе чтение одного пайпа может залипнуть на другом
-    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as errf:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=errf,
-            text=True,
-        )
-        if input_text is not None:
-            proc.stdin.write(input_text)
-        proc.stdin.close()
-        out: list[str] = []
-        for line in proc.stdout:
-            out.append(line)
-            on_line(line)
-        proc.stdout.close()
-        rc = proc.wait()
-        errf.seek(0)
-        return rc, "".join(out), errf.read()
+        if on_line is None:
+            p = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
+            return p.returncode, p.stdout, p.stderr
+
+        # stderr — во временный файл: чтение одного пайпа может залипнуть на другом
+        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as errf:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=errf,
+                text=True,
+            )
+            if input_text is not None:
+                proc.stdin.write(input_text)
+            proc.stdin.close()
+            out: list[str] = []
+            for line in proc.stdout:
+                out.append(line)
+                on_line(line)
+            proc.stdout.close()
+            rc = proc.wait()
+            errf.seek(0)
+            return rc, "".join(out), errf.read()
+    finally:
+        try:
+            os.unlink(envfile)
+        except OSError:
+            pass

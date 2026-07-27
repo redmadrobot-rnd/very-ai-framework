@@ -41,12 +41,18 @@ def install(ctx):
     )
     yield step("права read-only", rc == 0, err.strip()[:160] or "config/write пустые")
 
+    # Проба записью здесь невозможна: AMQP-клиента на хосте нет, есть только
+    # rabbitmqctl. Поэтому вычитываем применённые права обратно с брокера.
     rc, out, _ = ctx.sh(
         ["rabbitmqctl", "list_user_permissions", RO_USER, "--formatter", "json"],
         timeout=60,
     )
     locked = rc == 0 and '"^$"' in out.replace(" ", "")
-    yield step("запись отбита", locked, "config/write = ^$ (пусто)")
+    yield step(
+        "запись закрыта (по правам)",
+        locked,
+        "config/write = ^$" if locked else "права не подтвердились брокером",
+    )
 
     ctx.creds = {CREDS_ENV: f"amqp://{RO_USER}:{pw}@127.0.0.1:{PORT}/"}
 

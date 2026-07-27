@@ -16,6 +16,7 @@ from srv_explore import guard
 
 HERE = Path(__file__).resolve().parent
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
+MAX_TURNS = 40  # потолок шагов агента; общий потолок по времени — sandbox.MAX_SEC
 
 
 def _prompt() -> str:
@@ -79,7 +80,7 @@ async def _run(task: str) -> dict:
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_hook(steps)])]},
         cwd=os.environ.get("SRV_EXPLORE_CWD", "/"),
         setting_sources=[],
-        max_turns=int(os.environ.get("SRV_EXPLORE_MAX_TURNS", "40")),
+        max_turns=MAX_TURNS,
     )
     final: list[str] = []
     result: str | None = None

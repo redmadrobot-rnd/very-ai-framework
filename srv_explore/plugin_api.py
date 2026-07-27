@@ -61,19 +61,30 @@ class Ctx:
         """Значение поля формы (см. FIELDS плагина). Вводится один раз при Install."""
         return str(self._values.get(name) or default).strip()
 
-    def sh(self, argv: list[str], env: dict | None = None, timeout: int = 30):
-        """Запустить команду. Секреты — через env, не через argv (argv виден в ps)."""
+    def sh(
+        self,
+        argv: list[str],
+        env: dict | None = None,
+        timeout: int = 30,
+        input_text: str | None = None,
+    ):
+        """Запустить команду. Секреты — через env или input_text, не через argv
+        (argv виден в ps). Вывод возвращается уже без известных секретов: плагины
+        его усекают, а усечённый секрет редакцией потом не поймать."""
+        # своё окружение целиком не отдаём: в нём админ-токен и токен модели
+        base = {k: os.environ.get(k, "") for k in ("PATH", "HOME", "LANG")}
         try:
             p = subprocess.run(
                 argv,
-                env={**os.environ, **(env or {})},
+                env={**base, **(env or {})},
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                input=input_text,
             )
         except (OSError, subprocess.SubprocessError) as e:
-            return 1, "", str(e)
-        return p.returncode, p.stdout, p.stderr
+            return 1, "", self.redact(str(e))
+        return p.returncode, self.redact(p.stdout), self.redact(p.stderr)
 
     def sh_script(self, argv_for, content: str, suffix: str = "", timeout: int = 30):
         """Как sh, но команда работает с временным файлом 0600 — для клиентов,
@@ -112,7 +123,9 @@ class Ctx:
         return pw
 
     def redact(self, text: str) -> str:
-        """Вырезать все известные секреты из строки (детали шагов, ошибки клиентов)."""
+        """Вырезать известные секреты из строки. Режется точное совпадение — если
+        плагин выводит производное значение (например распарсенный пароль), пусть
+        сам добавит его в ctx.secrets."""
         for s in self.secrets:
             if s:
                 text = text.replace(s, "***")

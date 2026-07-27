@@ -13,11 +13,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROFILES_DIR = Path(os.environ.get("SRV_EXPLORE_PROFILES_DIR", str(HERE / "profiles")))
+PROFILES_DIR = HERE / "profiles"
 STATE = os.environ.get(
     "SRV_EXPLORE_PROFILE_STATE", "/var/lib/srv-explore/profiles.json"
 )
@@ -36,11 +37,17 @@ def _load() -> dict:
         mod = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(mod)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — один битый плагин не роняет остальные
+            print(f"plugins: {f.name} не загружен: {e!r}", file=sys.stderr)
             continue
         pid = getattr(mod, "ID", None)
-        if pid:
-            mods[pid] = mod
+        if not pid:
+            print(f"plugins: {f.name} без ID — пропущен", file=sys.stderr)
+            continue
+        if pid in mods:
+            msg = f"plugins: дубль ID {pid!r} в {f.name} — перекрывает"
+            print(msg, file=sys.stderr)
+        mods[pid] = mod
     return mods
 
 

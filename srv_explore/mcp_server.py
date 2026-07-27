@@ -65,14 +65,10 @@ def authorize(authorization: str | None, store: TokenStore):
     return store.verify(token)
 
 
-def admin_token() -> str | None:
-    """Админ-токен инстанса (гейт /admin). Генерит install.sh при развёртывании."""
-    return os.environ.get("SRV_EXPLORE_ADMIN_TOKEN") or None
-
-
 def admin_authorized(authorization: str | None) -> bool:
-    """True, если предъявлен верный админ-токен. Нет админ-токена в env → /admin off."""
-    configured = admin_token()
+    """True, если предъявлен верный админ-токен (env `SRV_EXPLORE_ADMIN_TOKEN`,
+    генерит install.sh). Нет админ-токена в env — /admin недоступна никому."""
+    configured = os.environ.get("SRV_EXPLORE_ADMIN_TOKEN") or None
     if not configured:
         return False
     provided = parse_bearer(authorization)
@@ -89,7 +85,6 @@ _AGENT_PASS_ENV = [
     "PATH",
     "SRV_EXPLORE_CWD",
     "SRV_EXPLORE_PROMPT",
-    "SRV_EXPLORE_MAX_TURNS",
 ]
 
 
@@ -114,11 +109,13 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     """
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
     active = profile_store.active_by_plugin()  # только установленные и включённые
+    reg = profile_store.registry()
     for creds in active.values():
         env.update(creds)
-    # чтобы агент не гадал, что ему выдали: имена переменных, без значений
+    # чтобы агент не гадал, что ему выдали: описание плагина + имена переменных
     env["SRV_EXPLORE_RESOURCES"] = "; ".join(
-        f"{pid}: {', '.join(creds)}" for pid, creds in sorted(active.items())
+        f"{reg.get(pid, pid)} — {', '.join(creds)}"
+        for pid, creds in sorted(active.items())
     )
     worker = [sys.executable, "-m", "srv_explore.agent_worker"]
     if steps is None:
@@ -141,15 +138,15 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     rc, out, err = await asyncio.to_thread(spawn)
     if "result" in final:
         return final["result"], steps
+    # результата нет: статус задачи должен быть error, а не done с обрезком.
+    # Собранные шаги не теряются — steps это тот же список, что лежит в job.
     tail = (err or out).strip()[:600]
     if rc != 0:
-        limit = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", sandbox.MAX_SEC)
-        return (
-            f"[agent прерван, код {rc}; лимит прогона {limit}s] "
-            f"собрано команд: {len(steps)}. {tail}",
-            steps,
+        raise RuntimeError(
+            f"агент прерван (код {rc}, лимит прогона {sandbox.MAX_SEC}s); "
+            f"успел команд: {len(steps)}. {tail}"
         )
-    return f"[agent не вернул результат] {tail}", steps
+    raise RuntimeError(f"агент не вернул результат. {tail}")
 
 
 # --- реестр задач (job-id + poll) --------------------------------------------
@@ -225,17 +222,41 @@ def build_app(store: TokenStore | None = None):
 
     @mcp.tool()
     async def srv_explore(task: str) -> str:
-        """Запустить readonly-разведку по задаче. Вернёт job_id (поллить status)."""
+        """Спросить сервер: readonly-агент на хосте выполнит задачу и вернёт факты.
+
+        Асинхронно: здесь возвращается только job_id, результат забирай
+        srv_explore_status(job_id), опрашивая раз в 3-5 секунд (прогон занимает от
+        20 секунд до нескольких минут, потолок — 10 минут).
+
+        task — цель словами, без готовых команд («почему сервис отдаёт 502?»).
+        Агент только читает: изменить файлы, БД, контейнеры или сходить в интернет
+        он не может — просить его об этом бесполезно.
+
+        В ответе resources — к чему у него сейчас есть доступ помимо файлов и логов.
+        """
         rec = CURRENT_TOKEN.get()
         label = rec.label if rec else "?"
         job_id = jobs.start(
             task, label=label, coro_factory=lambda steps: run_agent(task, steps)
         )
-        return json.dumps({"job_id": job_id, "status": "running"}, ensure_ascii=False)
+        reg = profile_store.registry()
+        resources = [reg.get(p, p) for p in sorted(profile_store.active_by_plugin())]
+        return json.dumps(
+            {"job_id": job_id, "status": "running", "resources": resources},
+            ensure_ascii=False,
+        )
 
     @mcp.tool()
     async def srv_explore_status(job_id: str) -> str:
-        """Статус/результат задачи разведки по job_id."""
+        """Статус задачи разведки: running | done | error.
+
+        running — продолжай опрашивать; steps растёт по ходу и показывает, какие
+        команды агент уже выполнил (ok=false значит команду отклонила гигиена, агент
+        обычно переформулирует сам).
+        done — result содержит факты: что спросили, какие команды, что показали.
+        error — в error причина; шаги, собранные до обрыва, остаются в steps и обычно
+        уже отвечают на часть вопроса.
+        """
         job = jobs.get(job_id)
         if job is None:
             return json.dumps({"error": "unknown job_id"}, ensure_ascii=False)
@@ -297,7 +318,6 @@ def build_app(store: TokenStore | None = None):
             return denied
         return JSONResponse(
             {
-                "security": security,
                 "status": backstop.status(security),
                 "net_status": backstop.net_status(security),
             }

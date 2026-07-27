@@ -67,7 +67,6 @@
 
   .tok { background: #3fb9501a; border: 1px solid #2ea04366; border-radius: 8px; padding: .7rem .9rem; margin: .9rem 0 .2rem; }
   .tok code { display: inline-block; margin-top: .35rem; color: #7ee787; word-break: break-all; font-size: .95em; }
-  .pill { font-size: .74rem; padding: .12rem .55rem; border-radius: 999px; border: 1px solid var(--bd); color: var(--mut); }
   .st { font-size: .74rem; padding: .12rem .55rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; }
   .running { color: var(--amber); border-color: #d2992255; background: #d299221a; }
   .done { color: var(--green); border-color: #2ea04355; background: #3fb9501a; }
@@ -165,7 +164,7 @@
       <table id="proftbl"><thead><tr><th>плагин</th><th>что даёт</th><th>установка</th><th>агенту</th></tr></thead><tbody></tbody></table>
     </div>
 
-    <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 15 на юзера</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
+    <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 100 прогонов, в памяти сервиса</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
     <div class="card tbl-card">
       <table id="runtbl"><thead><tr><th class="chevcol"></th><th>время</th><th>кто</th><th>задача</th><th>статус</th></tr></thead><tbody></tbody></table>
     </div>
@@ -257,7 +256,7 @@ async function loadProfiles() {
       <td class="muted">${esc(p.desc)}</td>
       <td>${mark}
         <button class="rl" onclick="installPlugin('${esc(p.name)}')">${p.installed ? "переустановить" : "Install"}</button>
-        ${p.installed ? `<button class="rl" onclick="uninstallPlugin('${esc(p.name)}')">снять</button>` : ""}
+        <button class="rl" onclick="uninstallPlugin('${esc(p.name)}')">снять</button>
         ${p.checklist && p.checklist.length ? `<button class="rl" onclick="toggleChecklist('${esc(p.name)}')">чеклист</button>` : ""}
       </td>
       <td><label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""}
@@ -328,7 +327,10 @@ async function installPlugin(name, fromForm) {
 
 async function uninstallPlugin(name) {
   if (profBusy) return;
-  if (!confirm("Снять установку " + name + "? Креды будут забыты, плагин выключится.")) return;
+  if (!confirm("Снять установку " + name + "?
+
+Креды будут забыты, плагин выключится.
+Созданная в ресурсе read-only учётка останется — удалить её можно только вручную.")) return;
   setProfBusy(true);
   try { await post({ name, action: "uninstall" }); } catch (e) { alert(e.message); }
   setProfBusy(false);

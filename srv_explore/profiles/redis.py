@@ -29,7 +29,9 @@ CREDS_ENV = "REDIS_INSPECTOR_DSN"
 RO_USER = "srvx_readonly"
 
 
-def _cli(ctx, dsn: str, args: list[str]):
+def _cli(ctx, dsn: str, args: list[str], stdin_cmd: str | None = None):
+    """redis-cli: пароль админа — через REDISCLI_AUTH, команда с секретом внутри —
+    через stdin (argv виден в ps любому на хосте)."""
     host, port = dsn_host(dsn)
     user, pw = dsn_user(dsn)
     argv = [
@@ -42,7 +44,11 @@ def _cli(ctx, dsn: str, args: list[str]):
     ]
     if user:
         argv += ["--user", user]
-    return ctx.sh(argv + args, env={"REDISCLI_AUTH": pw} if pw else None)
+    return ctx.sh(
+        argv + args,
+        env={"REDISCLI_AUTH": pw} if pw else None,
+        input_text=stdin_cmd,
+    )
 
 
 def install(ctx):
@@ -66,23 +72,11 @@ def install(ctx):
     yield step("ACL поддерживается", rc == 0, (err or out).strip()[:160] or "Redis ≥ 6")
 
     pw = ctx.password()
-    rc, out, err = _cli(
-        ctx,
-        admin_dsn,
-        [
-            "ACL",
-            "SETUSER",
-            RO_USER,
-            "on",
-            f">{pw}",
-            "~*",
-            "&*",
-            "+@read",
-            "-@dangerous",
-            "resetchannels",
-        ],
-    )
-    yield step("RO-юзер создан", rc == 0, (err or out).strip()[:160] or RO_USER)
+    # команда с паролем идёт через stdin, а не argv
+    setuser = f"ACL SETUSER {RO_USER} on >{pw} ~* &* +@read -@dangerous resetchannels\n"
+    rc, out, err = _cli(ctx, admin_dsn, [], stdin_cmd=setuser)
+    created = rc == 0 and "ERR" not in (out + err).upper()
+    yield step("RO-юзер создан", created, (err or out).strip()[:160] or RO_USER)
 
     # ACL живёт в памяти: без SAVE юзер исчезнет при рестарте (нужен aclfile/CONFIG).
     rc, out, _ = _cli(ctx, admin_dsn, ["ACL", "SAVE"])

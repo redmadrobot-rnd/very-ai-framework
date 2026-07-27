@@ -53,17 +53,19 @@ def install(pid: str, values: dict | None = None) -> dict:
                 ok = False
                 break
     except Exception as e:  # noqa: BLE001 — падение плагина = пункт чеклиста, не 500
-        detail = f"{type(e).__name__}: {e}"[:200]
+        detail = ctx.redact(f"{type(e).__name__}: {e}")[:200]  # редакция ДО усечения
         checklist.append(step("установка прервана", False, detail))
         ok = False
 
-    # чеклист уходит на диск и в UI — секретов в нём быть не должно
+    ok = ok and bool(checklist)  # плагин, не выдавший ни шага, не «установлен»
+    # страховка: чеклист уходит на диск и в UI, секретов в нём быть не должно
     for s in checklist:
-        s["detail"] = ctx.redact(s.get("detail", ""))
+        s["detail"] = ctx.redact(str(s.get("detail", "")))
 
-    if ok and ctx.creds:
-        profile_store.set_creds(pid, ctx.creds)
-    else:
+    if ok:
+        if ctx.creds:
+            profile_store.set_creds(pid, ctx.creds)
+    else:  # неудача — прежний доступ мог стать недействительным, чистим
         profile_store.drop_creds(pid)
         profile_store.set_enabled(pid, False)
     profile_store.set_checklist(pid, checklist, ok)

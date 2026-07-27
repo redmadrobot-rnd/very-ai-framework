@@ -52,27 +52,24 @@ fi
 # агент (srvx-agent) должен уметь читать/исполнять код и venv из песочницы
 chmod -R a+rX "$APP_DIR"
 
-# 5. env-файл (несекретные дефолты; CLAUDE_CODE_OAUTH_TOKEN дописывает деплой)
+# 5. env-файл. Ключи дописываются по одному и только если их ещё нет — так апгрейд
+# добавляет новые, не трогая правки админа. CLAUDE_CODE_OAUTH_TOKEN дописывает деплой.
 if [ ! -f "$CFG_DIR/env" ]; then
   cat > "$CFG_DIR/env" <<EOF
-SRV_EXPLORE_HOST=127.0.0.1
-SRV_EXPLORE_PORT=8765
-SRV_EXPLORE_CWD=/
-SRV_EXPLORE_PROMPT=$APP_DIR/srv_explore/agent_prompt.md
-SRV_EXPLORE_TOKENS=$STATE_DIR/tokens.json
-SRV_EXPLORE_PROFILE_STATE=$STATE_DIR/profiles.json
-SRV_EXPLORE_PROXY=http://127.0.0.1:3128
-# Доверенные адреса, куда агенту МОЖНО наружу (всё прочее egress обрублен):
-#   *_DOMAINS — через прокси (список для tinyproxy), *_CIDRS — напрямую (firewall).
-SRV_EXPLORE_TRUSTED_DOMAINS=
-SRV_EXPLORE_TRUSTED_CIDRS=
+# srv-explore. Правки применяются рестартом: systemctl restart srv-explore
 # CLAUDE_CODE_OAUTH_TOKEN (авторизация модели) — дописывает деплой, не коммитить.
-# SRV_EXPLORE_ADMIN_TOKEN (гейт /admin) — генерится ниже при первой установке.
+# SRV_EXPLORE_TRUSTED_* — куда агенту МОЖНО наружу (всё прочее egress обрублен):
+#   _DOMAINS (через прокси, список через запятую), _CIDRS (напрямую, firewall).
 EOF
   chmod 0640 "$CFG_DIR/env"
 fi
 
 ensure_env_kv() { grep -q "^$1=" "$CFG_DIR/env" || printf '%s=%s\n' "$1" "$2" >> "$CFG_DIR/env"; }
+ensure_env_kv SRV_EXPLORE_HOST 127.0.0.1
+ensure_env_kv SRV_EXPLORE_PORT 8765
+ensure_env_kv SRV_EXPLORE_CWD /
+ensure_env_kv SRV_EXPLORE_PROMPT "$APP_DIR/srv_explore/agent_prompt.md"
+ensure_env_kv SRV_EXPLORE_TOKENS "$STATE_DIR/tokens.json"
 ensure_env_kv SRV_EXPLORE_PROFILE_STATE "$STATE_DIR/profiles.json"
 ensure_env_kv SRV_EXPLORE_PUBLIC_HOST "$(hostname -I 2>/dev/null | awk '{print $1}')"
 ensure_env_kv SRV_EXPLORE_PROXY "http://127.0.0.1:3128"
@@ -167,6 +164,5 @@ systemctl enable srv-explore.service
 systemctl restart srv-explore.service
 
 echo "==> готово. Статус: systemctl status srv-explore --no-pager"
-echo "    Токены/профили: http://<host>:<port>/admin (админ-токен выше)."
-echo "    CLI выдачи токена: $APP_DIR/venv/bin/python -m srv_explore.token_store \\"
-echo "      --store $STATE_DIR/tokens.json issue --label <кто>"
+echo "    Админка (юзеры, плагины, прогоны): http://127.0.0.1:8765/admin"
+echo "    Админ-токен потерян? grep SRV_EXPLORE_ADMIN_TOKEN $CFG_DIR/env"
