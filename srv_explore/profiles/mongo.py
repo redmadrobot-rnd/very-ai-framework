@@ -116,13 +116,18 @@ def install(ctx):
     rc, _, err = _eval(ctx, ro_dsn, "print(db.getCollectionNames().length)")
     yield step("RO читает", rc == 0, err.strip()[:160] or "чтение ok")
 
+    # Отказ засчитывается только по явному сигналу авторизации: просто ненулевой
+    # код мог бы прийти от обрыва связи или ошибки в самом скрипте, и тогда
+    # «не смогли записать» означало бы «не смогли дотянуться».
     rc, out, err = _eval(ctx, ro_dsn, "db._srvx_probe.insertOne({x: 1})")
     text = (err + out).lower()
-    denied = rc != 0 or "not authorized" in text or "unauthorized" in text
-    yield step(
-        "запись отбита",
-        denied,
-        "insertOne → not authorized" if denied else "ЗАПИСЬ ПРОШЛА — юзер не RO",
-    )
+    denied = rc != 0 and ("not authorized" in text or "unauthorized" in text)
+    if rc == 0:
+        detail = "ЗАПИСЬ ПРОШЛА — юзер не RO"
+    elif denied:
+        detail = "insertOne → not authorized"
+    else:
+        detail = f"проба не дошла, отказ не подтверждён: {(err or out).strip()[:110]}"
+    yield step("запись отбита", denied, detail)
 
     ctx.creds = {CREDS_ENV: ro_dsn}

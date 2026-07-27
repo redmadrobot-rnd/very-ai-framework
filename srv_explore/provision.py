@@ -64,6 +64,9 @@ def install(pid: str, values: dict | None = None) -> dict:
 
     if ok and ctx.creds:
         profile_store.set_creds(pid, ctx.creds)
+        # установка оставляет ресурс поднятым (иначе нечем пробовать) — вернуть
+        # его в состояние, которое сейчас показывает тумблер
+        _apply_toggle(pid, profile_store.load().get(pid, False))
     else:
         # Неудача или переустановка без кред: прежние могли протухнуть, чистим —
         # иначе агент получил бы креды прошлой установки под свежим чеклистом.
@@ -72,6 +75,25 @@ def install(pid: str, values: dict | None = None) -> dict:
             profile_store.set_enabled(pid, False)
     profile_store.set_checklist(pid, checklist, ok)
     return {"ok": ok, "checklist": checklist}
+
+
+def _apply_toggle(pid: str, enabled: bool) -> None:
+    """Дать плагину физически открыть/закрыть ресурс. Без этого тумблер только
+    прячет креды, а ресурс вроде docker-прокси на loopback остаётся доступен
+    песочнице напрямую."""
+    hook = getattr(_plugin(pid), "toggle", None)
+    if hook is None:
+        return
+    try:
+        hook(Ctx(), enabled)
+    except Exception as e:  # noqa: BLE001 — наверх уходит как ошибка эндпоинта
+        raise RuntimeError(f"{pid}: не удалось переключить ресурс — {e}") from e
+
+
+def toggle(pid: str, enabled: bool) -> None:
+    """Тумблер On/Off. Ресурс закрывается до того, как забываются креды."""
+    _apply_toggle(pid, enabled)
+    profile_store.set_enabled(pid, enabled)
 
 
 def uninstall(pid: str) -> None:

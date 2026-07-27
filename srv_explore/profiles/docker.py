@@ -80,5 +80,16 @@ def install(ctx):
     ctx.creds = {"DOCKER_HOST": DOCKER_HOST}
 
 
+def toggle(ctx, enabled):
+    """Тумблер гасит и поднимает сам прокси. Прятать DOCKER_HOST мало: прокси
+    слушает loopback, а loopback песочнице разрешён — выключенный плагин иначе
+    продолжал бы отдавать Docker API любому `curl 127.0.0.1:2375`.
+    `--restart unless-stopped` остановленный вручную контейнер не поднимает."""
+    verb = "start" if enabled else "stop"
+    rc, _, err = ctx.sh(["docker", verb, CONTAINER], timeout=60)
+    if rc != 0:
+        raise RuntimeError(f"docker {verb} {CONTAINER}: {err.strip()[:120]}")
+
+
 def uninstall(ctx):
     ctx.sh(["docker", "rm", "-f", CONTAINER])

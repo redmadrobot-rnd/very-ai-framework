@@ -19,7 +19,9 @@ CREDS_ENV = "RABBITMQ_INSPECTOR_API"
 RO_USER = "srvx_readonly"
 VHOST = "/"
 API_HOST = "127.0.0.1:15672"
-DENY = "^$"  # пустой regex: под него не подходит ни одно имя ресурса
+# Никогда не совпадает. "^$" сюда НЕ годится: у дефолтного обменника имя пустое,
+# и write="^$" разрешил бы publish в него, а оттуда — в любую очередь по ключу.
+DENY = "(?!)"
 PROBE_QUEUE = "srvx-probe"
 
 
@@ -29,22 +31,28 @@ def _ctl(ctx, args, pw=None):
 
 
 def _api(ctx, method: str, path: str, pw: str):
-    """Вызов management API под создаваемым юзером. Возвращает (http_code, тело)."""
-    rc, out, err = ctx.sh(
-        [
+    """Вызов management API под создаваемым юзером. Возвращает (http_code, тело).
+
+    Пароль уходит в конфиг curl (временный файл 0600), а не в `-u`: argv виден
+    в `ps` любому на хосте.
+    """
+    conf = (
+        f'user = "{RO_USER}:{pw}"\n'
+        'silent\nshow-error\nwrite-out = "\\n%{http_code}"\n'
+    )
+    rc, out, err = ctx.sh_script(
+        lambda f: [
             "curl",
-            "-sS",
-            "-u",
-            f"{RO_USER}:{pw}",
+            "-K",
+            f,
             "-o",
             "/dev/stdout",
-            "-w",
-            "\n%{http_code}",
             "-X",
             method,
             f"http://{API_HOST}{path}",
         ],
-        timeout=30,
+        conf,
+        suffix=".curl",
     )
     if rc != 0:
         return "000", err.strip()[:120]
@@ -112,8 +120,16 @@ def install(ctx):
 
     # Все три пустые: ни publish, ни declare, ни consume/get/purge через AMQP.
     rc, _, err = _ctl(ctx, ["set_permissions", "-p", VHOST, RO_USER, DENY, DENY, DENY])
+    yield step("AMQP-права сняты", rc == 0, err.strip()[:160] or f"все три = {DENY}")
+
+    # Брокер должен подтвердить, что применил именно never-match: опечатка в
+    # шаблоне тихо вернула бы юзеру право publish.
+    rc, out, _ = _ctl(ctx, ["list_user_permissions", RO_USER, "--formatter", "json"])
+    applied = rc == 0 and out.count(f'"{DENY}"') == 3
     yield step(
-        "AMQP-права сняты", rc == 0, err.strip()[:160] or "configure/write/read = ^$"
+        "права подтверждены брокером",
+        applied,
+        f"configure/write/read = {DENY}" if applied else out.strip()[:160],
     )
 
     code, body = _api(ctx, "GET", "/api/queues", pw)

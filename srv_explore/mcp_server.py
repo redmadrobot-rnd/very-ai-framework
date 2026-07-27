@@ -392,7 +392,7 @@ def build_app(store: TokenStore | None = None):
                             return JSONResponse(
                                 {"error": "плагин не установлен"}, status_code=400
                             )
-                        profile_store.set_enabled(name, action == "on")
+                        await asyncio.to_thread(provision.toggle, name, action == "on")
                     else:
                         return JSONResponse(
                             {"error": "неизвестное действие"}, status_code=400

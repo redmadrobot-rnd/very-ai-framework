@@ -95,6 +95,7 @@ def _state(tmp_path, monkeypatch):
             "leaky": _Leaky,
             "mute": _Mute,
             "empty": _Empty,
+            "gated": _Gated,
         },
     )
 
@@ -177,6 +178,54 @@ def test_active_creds_only_installed_and_enabled():
     assert profile_store.active_creds() == {"GOOD_DSN": "x://ro"}
     profile_store.set_enabled("good", False)
     assert profile_store.active_creds() == {}
+
+
+class _Gated:
+    """Плагин, который физически открывает и закрывает ресурс по тумблеру."""
+
+    ID = "gated"
+    DESC = "с ресурсом"
+    calls: list = []
+
+    @staticmethod
+    def install(ctx):
+        yield step("поднят", True)
+        ctx.creds = {"GATED": "x"}
+
+    @staticmethod
+    def toggle(ctx, enabled):
+        _Gated.calls.append(enabled)
+
+
+def test_toggle_closes_resource_not_just_creds():
+    """Прятать креды мало: docker-прокси слушает loopback, который песочнице
+    разрешён, поэтому Off обязан дойти до самого ресурса."""
+    _Gated.calls.clear()
+    provision.install("gated")
+    assert _Gated.calls == [False]  # установка вернула ресурс под текущий тумблер
+
+    provision.toggle("gated", True)
+    assert _Gated.calls[-1] is True
+    assert profile_store.active_creds() == {"GATED": "x"}
+
+    provision.toggle("gated", False)
+    assert _Gated.calls[-1] is False
+    assert profile_store.active_creds() == {}
+
+
+def test_toggle_failure_does_not_claim_success(monkeypatch):
+    """Не смогли погасить ресурс — тумблер не должен показывать Off."""
+    _Gated.calls.clear()
+    provision.install("gated")
+    provision.toggle("gated", True)
+
+    def boom(ctx, enabled):
+        raise OSError("демон не отвечает")
+
+    monkeypatch.setattr(_Gated, "toggle", staticmethod(boom))
+    with pytest.raises(RuntimeError):
+        provision.toggle("gated", False)
+    assert profile_store.load()["gated"] is True  # состояние не соврало
 
 
 def test_uninstall_clears_state():
