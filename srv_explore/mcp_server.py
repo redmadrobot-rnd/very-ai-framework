@@ -406,28 +406,6 @@ def build_app(store: TokenStore | None = None):
             }
         )
 
-    async def admin_ask(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
-        body = await request.json()
-        task = (body.get("task") or "").strip()
-        if not task:
-            return JSONResponse({"error": "task обязателен"}, status_code=400)
-        job_id = jobs.start(
-            task, label="admin", coro_factory=lambda steps: run_agent(task, steps)
-        )
-        return JSONResponse({"job_id": job_id})
-
-    async def admin_ask_status(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
-        job = jobs.get(request.path_params["job_id"])
-        if job is None:
-            return JSONResponse({"error": "unknown job_id"}, status_code=404)
-        return JSONResponse(job)
-
     def _profiles_payload():
         """Сохранённое состояние: установлен (+чеклист) и включён. Живых проб нет."""
         enabled = profile_store.load()
@@ -514,8 +492,6 @@ def build_app(store: TokenStore | None = None):
             Route("/admin/api/runs", admin_runs),
             Route("/admin/api/security", admin_security),
             Route("/admin/api/profiles", admin_profiles, methods=["GET", "POST"]),
-            Route("/admin/api/ask", admin_ask, methods=["POST"]),
-            Route("/admin/api/ask/{job_id}", admin_ask_status),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(SplitAuth)],
