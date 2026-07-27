@@ -136,7 +136,7 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
         return sandbox.run(worker, input_text=task, extra_env=env, on_line=on_line)
 
     rc, out, err = await asyncio.to_thread(spawn)
-    if "result" in final:
+    if (final.get("result") or "").strip():
         return final["result"], steps
     # результата нет: статус задачи должен быть error, а не done с обрезком.
     # Собранные шаги не теряются — steps это тот же список, что лежит в job.

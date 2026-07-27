@@ -310,14 +310,16 @@ function formValues(name) {
 
 async function installPlugin(name, fromForm) {
   if (profBusy) return;
+  const form = $("#form-" + name);          // есть форма — сначала показываем её
+  if (form && !fromForm) { form.style.display = ""; return; }
   const values = fromForm ? formValues(name) : {};
   setProfBusy(true);
   let r, d;
   try { [r, d] = await post({ name, action: "install", values }); }
   catch (e) { setProfBusy(false); alert(e.message); return; }
-  if (d.need_fields) {                   // плагин просит заполнить свою форму
+  if (d.need_fields) {                   // страховка: обязательное поле пустое
     setProfBusy(false);
-    const f = $("#form-" + name); if (f) f.style.display = "";
+    if (form) form.style.display = "";
     return;
   }
   if (!r.ok) alert(d.error || "ошибка");

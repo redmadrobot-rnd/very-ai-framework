@@ -15,6 +15,7 @@ ExecStart=/opt/srv-explore/venv/bin/python -m srv_explore.mcp_server
 Restart=on-failure
 RestartSec=5
 StateDirectory=srv-explore
+StateDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target

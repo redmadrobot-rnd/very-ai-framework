@@ -57,7 +57,8 @@ def install(ctx):
         ],
         timeout=180,
     )
-    yield step("socket-proxy поднят", rc == 0, err.strip()[:160] or BIND)
+    # stderr тут — прогресс скачивания образа, для детали он бесполезен
+    yield step("socket-proxy поднят", rc == 0, BIND if rc == 0 else err.strip()[:160])
 
     probe_env = {"DOCKER_HOST": DOCKER_HOST}
     rc = 1

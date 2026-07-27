@@ -75,8 +75,11 @@ def _read(path: Path, default):
 
 
 def _write(path: Path, data) -> None:
+    # 0600: в creds.json лежат ro-DSN. Песочница агента читает /var (RO-FS не
+    # прячет), поэтому от неё файлы закрыты правами, а не расположением.
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 
 

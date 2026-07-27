@@ -62,12 +62,14 @@ def install(pid: str, values: dict | None = None) -> dict:
     for s in checklist:
         s["detail"] = ctx.redact(str(s.get("detail", "")))
 
-    if ok:
-        if ctx.creds:
-            profile_store.set_creds(pid, ctx.creds)
-    else:  # неудача — прежний доступ мог стать недействительным, чистим
+    if ok and ctx.creds:
+        profile_store.set_creds(pid, ctx.creds)
+    else:
+        # Неудача или переустановка без кред: прежние могли протухнуть, чистим —
+        # иначе агент получил бы креды прошлой установки под свежим чеклистом.
         profile_store.drop_creds(pid)
-        profile_store.set_enabled(pid, False)
+        if not ok:
+            profile_store.set_enabled(pid, False)
     profile_store.set_checklist(pid, checklist, ok)
     return {"ok": ok, "checklist": checklist}
 

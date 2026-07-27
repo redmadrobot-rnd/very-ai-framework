@@ -60,6 +60,27 @@ class _Raising:
         raise RuntimeError("клиент сдох")
 
 
+class _Mute:
+    """Успешно проходит чеклист, но кред не выдаёт."""
+
+    ID = "mute"
+    DESC = "без кред"
+
+    @staticmethod
+    def install(ctx):
+        yield step("клиент", True)
+
+
+class _Empty:
+    ID = "empty"
+    DESC = "не выдаёт ни шага"
+
+    @staticmethod
+    def install(ctx):
+        return
+        yield  # pragma: no cover — делает функцию генератором
+
+
 @pytest.fixture(autouse=True)
 def _state(tmp_path, monkeypatch):
     """Изолированный StateDir + подменённый реестр плагинов."""
@@ -67,7 +88,14 @@ def _state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         profile_store,
         "modules",
-        lambda: {"good": _Good, "bad": _Failing, "boom": _Raising, "leaky": _Leaky},
+        lambda: {
+            "good": _Good,
+            "bad": _Failing,
+            "boom": _Raising,
+            "leaky": _Leaky,
+            "mute": _Mute,
+            "empty": _Empty,
+        },
     )
 
 
@@ -115,6 +143,26 @@ def test_secrets_never_reach_stored_checklist():
     stored = profile_store.installed_all()["leaky"]["checklist"][0]["detail"]
     assert _ADMIN not in stored  # и на диск он тоже не попал
     assert "pw=***" in stored  # сгенерированный пароль тоже
+
+
+def test_plugin_without_steps_is_not_installed():
+    res = provision.install("empty")
+    assert res["ok"] is False
+    assert not profile_store.is_installed("empty")
+
+
+def test_reinstall_without_creds_drops_previous_ones(monkeypatch):
+    """Плагин выдал креды, потом переустановка прошла молча — старые креды должны
+    уйти, иначе агент получит доступ, которого свежая установка не подтверждала."""
+    provision.install("good")
+    profile_store.set_enabled("good", True)
+    assert profile_store.active_creds() == {"GOOD_DSN": "x://ro"}
+
+    monkeypatch.setattr(_Good, "install", _Mute.install)
+    res = provision.install("good")
+    assert res["ok"] is True
+    assert profile_store.creds_all() == {}
+    assert profile_store.active_creds() == {}
 
 
 def test_unknown_plugin_raises():
