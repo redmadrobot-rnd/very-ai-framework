@@ -113,7 +113,13 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     админке), поэтому при обрыве по таймауту собранное не теряется.
     """
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
-    env.update(profile_store.active_creds())  # только установленные и включённые
+    active = profile_store.active_by_plugin()  # только установленные и включённые
+    for creds in active.values():
+        env.update(creds)
+    # чтобы агент не гадал, что ему выдали: имена переменных, без значений
+    env["SRV_EXPLORE_RESOURCES"] = "; ".join(
+        f"{pid}: {', '.join(creds)}" for pid, creds in sorted(active.items())
+    )
     worker = [sys.executable, "-m", "srv_explore.agent_worker"]
     if steps is None:
         steps = []
@@ -330,7 +336,7 @@ def build_app(store: TokenStore | None = None):
                 {
                     "name": n,
                     "desc": d,
-                    "needs_dsn": provision.needs_admin_dsn(n),
+                    "fields": provision.fields(n),  # форму рисует плагин, не ядро
                     "installed": bool(rec.get("ok")),
                     "enabled": enabled[n],
                     "checklist": rec.get("checklist", []),
@@ -347,15 +353,18 @@ def build_app(store: TokenStore | None = None):
             body = await request.json()
             name = body.get("name", "")
             action = body.get("action", "")
-            admin_dsn = (body.get("admin_dsn") or "").strip()
+            values = body.get("values") or {}
             if name not in profile_store.registry():
                 return JSONResponse({"error": "неизвестный плагин"}, status_code=404)
             async with prov_lock:  # установка/переключение строго последовательны
                 try:
                     if action == "install":
-                        if provision.needs_admin_dsn(name) and not admin_dsn:
-                            return JSONResponse({"need_dsn": True, "name": name})
-                        await asyncio.to_thread(provision.install, name, admin_dsn)
+                        if provision.missing_fields(name, values):
+                            # форму рисует админка по FIELDS плагина
+                            return JSONResponse(
+                                {"need_fields": provision.fields(name), "name": name}
+                            )
+                        await asyncio.to_thread(provision.install, name, values)
                     elif action == "uninstall":
                         await asyncio.to_thread(provision.uninstall, name)
                     elif action in ("on", "off"):

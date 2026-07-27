@@ -144,12 +144,20 @@ def drop_creds(pid: str) -> None:
         _write(_creds_path(), data)
 
 
-def active_creds() -> dict[str, str]:
-    """env агенту: только установленные И включённые плагины."""
+def active_by_plugin() -> dict[str, dict[str, str]]:
+    """Креды по плагинам — только установленные И включённые."""
     enabled = load()
     installed = installed_all()
+    return {
+        pid: creds
+        for pid, creds in creds_all().items()
+        if enabled.get(pid) and installed.get(pid, {}).get("ok")
+    }
+
+
+def active_creds() -> dict[str, str]:
+    """env агенту: плоский набор кред активных плагинов."""
     env: dict[str, str] = {}
-    for pid, creds in creds_all().items():
-        if enabled.get(pid) and installed.get(pid, {}).get("ok"):
-            env.update(creds)
+    for creds in active_by_plugin().values():
+        env.update(creds)
     return env

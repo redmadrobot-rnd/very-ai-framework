@@ -1,4 +1,4 @@
-"""Раннер установки плагина: гоняет чеклист, собирает вердикт, хранит креды.
+"""Раннер установки плагина: гоняет чеклист, вычищает секреты, хранит креды.
 
 Сервис привилегированный → apt/docker/клиенты зовутся напрямую, без sudo.
 Что именно делает плагин — знает сам плагин (profiles/*.py, контракт в plugin_api).
@@ -18,19 +18,32 @@ def _plugin(pid: str):
     return mod
 
 
-def needs_admin_dsn(pid: str) -> bool:
-    return bool(getattr(_plugin(pid), "NEEDS_ADMIN_DSN", False))
+def fields(pid: str) -> list[dict]:
+    """Поля формы установки, объявленные плагином (ядро в них не вникает)."""
+    return list(getattr(_plugin(pid), "FIELDS", []))
 
 
-def install(pid: str, admin_dsn: str = "") -> dict:
+def missing_fields(pid: str, values: dict) -> list[str]:
+    """Обязательные поля, которые админ не заполнил."""
+    return [
+        f["name"]
+        for f in fields(pid)
+        if f.get("required", True) and not str(values.get(f["name"]) or "").strip()
+    ]
+
+
+def install(pid: str, values: dict | None = None) -> dict:
     """Прогнать чеклист плагина. Успех → сохранить креды (агент получит их при On).
-    admin_dsn нигде не сохраняется — живёт только внутри этого вызова."""
+    Введённые значения живут только внутри вызова, на диск не попадают."""
     mod = _plugin(pid)
     runner = getattr(mod, "install", None)
     if runner is None:
         raise KeyError(f"{pid}: плагин не умеет install")
 
-    ctx = Ctx(admin_dsn)
+    values = values or {}
+    secret_names = {f["name"] for f in fields(pid) if f.get("secret")}
+    ctx = Ctx(values, secrets_in=[values.get(n) for n in secret_names])
+
     checklist: list[dict] = []
     ok = True
     try:
@@ -43,6 +56,10 @@ def install(pid: str, admin_dsn: str = "") -> dict:
         detail = f"{type(e).__name__}: {e}"[:200]
         checklist.append(step("установка прервана", False, detail))
         ok = False
+
+    # чеклист уходит на диск и в UI — секретов в нём быть не должно
+    for s in checklist:
+        s["detail"] = ctx.redact(s.get("detail", ""))
 
     if ok and ctx.creds:
         profile_store.set_creds(pid, ctx.creds)

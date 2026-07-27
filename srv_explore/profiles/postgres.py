@@ -5,14 +5,23 @@ from srv_explore.plugin_api import (
     dsn_host,
     dsn_user,
     dsn_with_creds,
+    field,
     step,
     tcp_open,
 )
 
 ID = "postgres"
 DESC = "PostgreSQL — read-only роль"
-NEEDS_ADMIN_DSN = True
 PACKAGES = ["postgresql-client"]
+FIELDS = [
+    field(
+        "admin_dsn",
+        "Админский DSN",
+        "postgresql://admin:пароль@host:5432/база",
+        secret=True,
+        hint="одноразово: из него создаётся read-only роль, сам DSN не сохраняется",
+    )
+]
 CREDS_ENV = "PG_INSPECTOR_DSN"
 RO_ROLE = "srvx_readonly"  # фиксированное имя — повторный Install не плодит юзеров
 
@@ -52,21 +61,23 @@ def _psql(ctx, dsn: str, sql: str):
 
 
 def install(ctx):
+    admin_dsn = ctx.field("admin_dsn")
+
     ok, detail = ctx.apt(PACKAGES)
     yield step("клиент psql", ok and ctx.which("psql"), detail)
 
-    host, port = dsn_host(ctx.admin_dsn)
+    host, port = dsn_host(admin_dsn)
     yield step("БД обнаружена", tcp_open(host, port or 5432), f"{host}:{port or 5432}")
 
-    rc, _, err = _psql(ctx, ctx.admin_dsn, "SELECT 1")
+    rc, _, err = _psql(ctx, admin_dsn, "SELECT 1")
     yield step("админ-доступ", rc == 0, err.strip()[:160] or "SELECT 1 ok")
 
     pw = ctx.password()
-    sql = SETUP.format(role=RO_ROLE, pw=pw, db=dsn_db(ctx.admin_dsn))
-    rc, _, err = _psql(ctx, ctx.admin_dsn, sql)
+    sql = SETUP.format(role=RO_ROLE, pw=pw, db=dsn_db(admin_dsn))
+    rc, _, err = _psql(ctx, admin_dsn, sql)
     yield step("RO-роль создана", rc == 0, err.strip()[:160] or RO_ROLE)
 
-    ro_dsn = dsn_with_creds(ctx.admin_dsn, RO_ROLE, pw)
+    ro_dsn = dsn_with_creds(admin_dsn, RO_ROLE, pw)
     rc, _, err = _psql(ctx, ro_dsn, "SELECT 1")
     yield step("RO читает", rc == 0, err.strip()[:160] or "SELECT 1 ok")
 

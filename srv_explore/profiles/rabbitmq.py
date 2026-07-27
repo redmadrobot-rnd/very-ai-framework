@@ -8,7 +8,7 @@ from srv_explore.plugin_api import step
 
 ID = "rabbitmq"
 DESC = "RabbitMQ — monitoring-юзер (read)"
-NEEDS_ADMIN_DSN = False
+FIELDS = []  # ничего вводить не нужно
 CREDS_ENV = "RABBITMQ_INSPECTOR_DSN"
 RO_USER = "srvx_readonly"
 VHOST = "/"

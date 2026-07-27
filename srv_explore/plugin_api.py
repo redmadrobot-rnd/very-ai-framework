@@ -1,8 +1,12 @@
 """Контракт плагина: что плагин получает и что отдаёт.
 
-Плагин (profiles/*.py) объявляет метаданные и генератор `install(ctx)`, который
-yield-ит шаги чеклиста. Первый упавший шаг останавливает установку. Успешный прогон
-кладёт креды агенту в `ctx.creds`.
+Плагин (profiles/*.py) объявляет метаданные, список полей формы `FIELDS` и генератор
+`install(ctx)`, который yield-ит шаги чеклиста. Первый упавший шаг останавливает
+установку. Успешный прогон кладёт креды агенту в `ctx.creds`.
+
+Что вводит админ — решает сам плагин: ядро рендерит форму по `FIELDS` и кладёт
+введённое в `ctx.field(<имя>)`. Ядро не знает ни про DSN, ни про какие-либо другие
+поля конкретных плагинов.
 
 Модуль намеренно без зависимостей на остальной пакет — его импортируют и плагины,
 и провизионер.
@@ -23,13 +27,39 @@ def step(name: str, ok: bool, detail: str = "") -> dict:
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
+def field(
+    name: str,
+    label: str,
+    placeholder: str = "",
+    secret: bool = False,
+    required: bool = True,
+    hint: str = "",
+) -> dict:
+    """Поле формы установки. Ядро отрендерит его в админке и вернёт в ctx.field(name).
+    secret=True — ввод скрыт, значение вырезается из чеклиста и нигде не сохраняется."""
+    return {
+        "name": name,
+        "label": label,
+        "placeholder": placeholder,
+        "secret": bool(secret),
+        "required": bool(required),
+        "hint": hint,
+    }
+
+
 class Ctx:
     """Инструменты плагина на время установки. Сервис привилегированный (root),
     поэтому apt/docker/клиенты зовутся напрямую."""
 
-    def __init__(self, admin_dsn: str = ""):
-        self.admin_dsn = admin_dsn  # одноразовый, никуда не сохраняется
+    def __init__(self, values: dict | None = None, secrets_in: list | None = None):
+        self._values = dict(values or {})
         self.creds: dict[str, str] = {}  # что получит агент при On
+        # что нельзя показывать/сохранять: введённые секреты + сгенерированные
+        self.secrets: list[str] = [s for s in (secrets_in or []) if s]
+
+    def field(self, name: str, default: str = "") -> str:
+        """Значение поля формы (см. FIELDS плагина). Вводится один раз при Install."""
+        return str(self._values.get(name) or default).strip()
 
     def sh(self, argv: list[str], env: dict | None = None, timeout: int = 30):
         """Запустить команду. Секреты — через env, не через argv (argv виден в ps)."""
@@ -75,7 +105,18 @@ class Ctx:
         return rc == 0, "установлено" if rc == 0 else err.strip()[:200]
 
     def password(self) -> str:
-        return secrets.token_hex(24)
+        """Пароль для создаваемой read-only роли. Запоминается как секрет — не попадёт
+        ни в чеклист, ни в UI."""
+        pw = secrets.token_hex(24)
+        self.secrets.append(pw)
+        return pw
+
+    def redact(self, text: str) -> str:
+        """Вырезать все известные секреты из строки (детали шагов, ошибки клиентов)."""
+        for s in self.secrets:
+            if s:
+                text = text.replace(s, "***")
+        return text
 
 
 # --- DSN: разбор и сборка (нужно почти каждому БД-плагину) ----------------------

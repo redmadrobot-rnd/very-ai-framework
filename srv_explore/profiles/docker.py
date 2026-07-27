@@ -10,7 +10,7 @@ from srv_explore.plugin_api import step
 
 ID = "docker"
 DESC = "Docker — read-only через socket-proxy"
-NEEDS_ADMIN_DSN = False
+FIELDS = []  # ничего вводить не нужно
 
 CONTAINER = "srvx-docker-proxy"
 IMAGE = "tecnativa/docker-socket-proxy:latest"

@@ -271,16 +271,24 @@ async function loadProfiles() {
     det.innerHTML = `<td colspan="4"><div class="detail">${checklistHtml(p.checklist)}</div></td>`;
     tb.appendChild(det);
 
-    const form = document.createElement("tr");
-    form.className = "drow"; form.id = "dsn-" + p.name; form.style.display = "none";
-    form.innerHTML = `<td colspan="4"><div class="detail">
-      <div class="muted" style="margin-bottom:.4rem">Админский DSN — <b>одноразово</b>, не сохраняется. Из него создастся read-only доступ для агента:</div>
-      <div class="bar">
-        <input type="password" id="dsnin-${esc(p.name)}" placeholder="postgresql://admin:pw@host:5432/db" style="flex:1;min-width:320px"><!-- pragma: allowlist secret -->
-        <button class="primary" onclick="installPlugin('${esc(p.name)}', true)">Установить</button>
-        <button onclick="cancelDsn('${esc(p.name)}')">Отмена</button>
-      </div></div></td>`;
-    tb.appendChild(form);
+    if (p.fields && p.fields.length) {          // форму описывает сам плагин
+      const form = document.createElement("tr");
+      form.className = "drow"; form.id = "form-" + p.name; form.style.display = "none";
+      const inputs = p.fields.map(f => `
+        <label style="display:block;margin-bottom:.5rem">
+          <span class="muted">${esc(f.label)}${f.required === false ? " (необязательно)" : ""}</span><br>
+          <input type="${f.secret ? "password" : "text"}" data-field="${esc(f.name)}"
+                 placeholder="${esc(f.placeholder || "")}" style="width:100%;max-width:520px">
+          ${f.hint ? `<span class="muted" style="font-size:.8rem">${esc(f.hint)}</span>` : ""}
+        </label>`).join("");
+      form.innerHTML = `<td colspan="4"><div class="detail" data-form="${esc(p.name)}">
+        ${inputs}
+        <div class="bar" style="margin-top:.3rem">
+          <button class="primary" onclick="installPlugin('${esc(p.name)}', true)">Установить</button>
+          <button onclick="cancelForm('${esc(p.name)}')">Отмена</button>
+        </div></div></td>`;
+      tb.appendChild(form);
+    }
   }
 }
 
@@ -294,17 +302,23 @@ async function post(body) {
   return [r, await r.json()];
 }
 
-async function installPlugin(name, withDsn) {
+function formValues(name) {
+  const box = document.querySelector(`[data-form="${CSS.escape(name)}"]`);
+  const out = {};
+  if (box) box.querySelectorAll("input[data-field]").forEach(i => out[i.dataset.field] = i.value.trim());
+  return out;
+}
+
+async function installPlugin(name, fromForm) {
   if (profBusy) return;
-  const dsn = withDsn ? $("#dsnin-" + name).value.trim() : "";
-  if (withDsn && !dsn) { alert("вставь DSN"); return; }
+  const values = fromForm ? formValues(name) : {};
   setProfBusy(true);
   let r, d;
-  try { [r, d] = await post({ name, action: "install", admin_dsn: dsn }); }
+  try { [r, d] = await post({ name, action: "install", values }); }
   catch (e) { setProfBusy(false); alert(e.message); return; }
-  if (d.need_dsn) {                      // плагину нужен админский доступ — спрашиваем
+  if (d.need_fields) {                   // плагин просит заполнить свою форму
     setProfBusy(false);
-    const f = $("#dsn-" + name); if (f) f.style.display = "";
+    const f = $("#form-" + name); if (f) f.style.display = "";
     return;
   }
   if (!r.ok) alert(d.error || "ошибка");
@@ -332,8 +346,8 @@ async function switchPlugin(name, on) {
   await loadProfiles();
 }
 
-function cancelDsn(name) {
-  const f = $("#dsn-" + name); if (f) f.style.display = "none";
+function cancelForm(name) {
+  const f = $("#form-" + name); if (f) f.style.display = "none";
 }
 
 let askTimer = null;

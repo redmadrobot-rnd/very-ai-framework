@@ -20,7 +20,14 @@ ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 
 def _prompt() -> str:
     path = Path(os.environ.get("SRV_EXPLORE_PROMPT", str(HERE / "agent_prompt.md")))
-    return path.read_text(encoding="utf-8").strip()
+    text = path.read_text(encoding="utf-8").strip()
+    res = os.environ.get("SRV_EXPLORE_RESOURCES", "").strip()
+    tail = (
+        f"Доступные ресурсы (креды уже в окружении, значения не печатай): {res}"
+        if res
+        else "Доступных ресурсов нет: плагины выключены, только файлы и логи."
+    )
+    return f"{text}\n\n{tail}"
 
 
 def _emit(event: dict) -> None:

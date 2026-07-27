@@ -4,11 +4,26 @@
 Нужен Redis ≥ 6 (ACL).
 """
 
-from srv_explore.plugin_api import dsn_host, dsn_user, dsn_with_creds, step, tcp_open
+from srv_explore.plugin_api import (
+    dsn_host,
+    dsn_user,
+    dsn_with_creds,
+    field,
+    step,
+    tcp_open,
+)
 
 ID = "redis"
 DESC = "Redis — read-only ACL-юзер"
-NEEDS_ADMIN_DSN = True
+FIELDS = [
+    field(
+        "admin_dsn",
+        "Админский DSN",
+        "redis://:пароль@host:6379",
+        secret=True,
+        hint="одноразово: из него создаётся ACL-юзер, сам DSN не сохраняется",
+    )
+]
 PACKAGES = ["redis-tools"]
 CREDS_ENV = "REDIS_INSPECTOR_DSN"
 RO_USER = "srvx_readonly"
@@ -31,6 +46,8 @@ def _cli(ctx, dsn: str, args: list[str]):
 
 
 def install(ctx):
+    admin_dsn = ctx.field("admin_dsn")
+
     ok, detail = ctx.apt(PACKAGES)
     yield step(
         "клиент redis-cli",
@@ -38,20 +55,20 @@ def install(ctx):
         detail if not ok else "redis-cli готов",
     )
 
-    host, port = dsn_host(ctx.admin_dsn)
+    host, port = dsn_host(admin_dsn)
     port = port or 6379
     yield step("ресурс обнаружен", tcp_open(host, port), f"{host}:{port}")
 
-    rc, out, err = _cli(ctx, ctx.admin_dsn, ["PING"])
+    rc, out, err = _cli(ctx, admin_dsn, ["PING"])
     yield step("админ-доступ", rc == 0 and "PONG" in out, (err or out).strip()[:160])
 
-    rc, out, err = _cli(ctx, ctx.admin_dsn, ["ACL", "WHOAMI"])
+    rc, out, err = _cli(ctx, admin_dsn, ["ACL", "WHOAMI"])
     yield step("ACL поддерживается", rc == 0, (err or out).strip()[:160] or "Redis ≥ 6")
 
     pw = ctx.password()
     rc, out, err = _cli(
         ctx,
-        ctx.admin_dsn,
+        admin_dsn,
         [
             "ACL",
             "SETUSER",
@@ -68,14 +85,14 @@ def install(ctx):
     yield step("RO-юзер создан", rc == 0, (err or out).strip()[:160] or RO_USER)
 
     # ACL живёт в памяти: без SAVE юзер исчезнет при рестарте (нужен aclfile/CONFIG).
-    rc, out, _ = _cli(ctx, ctx.admin_dsn, ["ACL", "SAVE"])
+    rc, out, _ = _cli(ctx, admin_dsn, ["ACL", "SAVE"])
     yield step(
         "ACL сохранён",
         True,
         "сохранён" if rc == 0 else "aclfile не настроен — юзер до рестарта",
     )
 
-    ro_dsn = dsn_with_creds(ctx.admin_dsn, RO_USER, pw)
+    ro_dsn = dsn_with_creds(admin_dsn, RO_USER, pw)
     rc, out, err = _cli(ctx, ro_dsn, ["DBSIZE"])
     yield step("RO читает", rc == 0, (err or out).strip()[:160] or "DBSIZE ok")
 
