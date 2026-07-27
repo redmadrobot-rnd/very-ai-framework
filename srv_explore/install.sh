@@ -38,15 +38,21 @@ rm -rf "$APP_DIR/srv_explore"
 cp -r "$PKG" "$APP_DIR/srv_explore"
 find "$APP_DIR/srv_explore" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
-# 4. venv + зависимости
+# 4. интерпретатор + venv + зависимости. Одна проверка на оба случая: нет python3
+# вообще и есть, но без ensurepip (Debian вынес venv в отдельный пакет).
 if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
-    echo "==> python3-venv отсутствует — доустанавливаю"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv >/dev/null
+    echo "==> python3 с venv отсутствует — доустанавливаю"
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv >/dev/null
   else
-    echo "python3 venv/ensurepip недоступен и нет apt-get — установи вручную" >&2
+    echo "нет python3 с venv и нет apt-get — установи python3 вручную" >&2
     exit 1
   fi
+  python3 -c "import ensurepip" >/dev/null 2>&1 || {
+    echo "python3 поставлен, но venv/ensurepip недоступен — разбирайся руками" >&2
+    exit 1
+  }
 fi
 [ -x "$APP_DIR/venv/bin/python" ] || python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip

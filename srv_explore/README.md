@@ -59,7 +59,8 @@ srv_explore("сколько заказов в статусе pending старш�
 systemd-юнит — идемпотентно. Руками (`sudo bash srv_explore/install.sh`) — только для
 отладки.
 
-Требования к серверу: Linux с **systemd и cgroup v2**, root, `python3`, `apt-get`.
+Требования к серверу: Linux с **systemd и cgroup v2**, root, `apt-get` (Debian/Ubuntu).
+`python3` и venv `install.sh` доустановит сам, если их нет.
 В environment нужны `SSH_HOST` / `SSH_USER` (variables) и `SSH_KEY` +
 `CLAUDE_CODE_OAUTH_TOKEN` (secrets).
 
