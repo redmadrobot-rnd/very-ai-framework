@@ -121,6 +121,11 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
         f"{reg.get(pid, pid)} — {', '.join(creds)}"
         for pid, creds in sorted(active.items())
     )
+    # и что существует, но не выдано: иначе агент перебирает обходные пути вместо
+    # того, чтобы сразу назвать плагин, который админу надо включить
+    env["SRV_EXPLORE_RESOURCES_OFF"] = "; ".join(
+        f"{pid} ({desc})" for pid, desc in sorted(reg.items()) if pid not in active
+    )
     worker = [sys.executable, "-m", "srv_explore.agent_worker"]
     if steps is None:
         steps = []

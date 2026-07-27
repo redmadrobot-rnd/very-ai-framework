@@ -23,12 +23,18 @@ def _prompt() -> str:
     path = Path(os.environ.get("SRV_EXPLORE_PROMPT", str(HERE / "agent_prompt.md")))
     text = path.read_text(encoding="utf-8").strip()
     res = os.environ.get("SRV_EXPLORE_RESOURCES", "").strip()
-    tail = (
+    off = os.environ.get("SRV_EXPLORE_RESOURCES_OFF", "").strip()
+    tail = [
         f"Доступные ресурсы (креды уже в окружении, значения не печатай): {res}"
         if res
         else "Доступных ресурсов нет: плагины выключены, только файлы и логи."
-    )
-    return f"{text}\n\n{tail}"
+    ]
+    if off:
+        tail.append(
+            f"Выключенные ресурсы — доступа к ним НЕТ и обходных путей не ищи, "
+            f"назови плагин администратору и остановись: {off}"
+        )
+    return "\n\n".join([text, *tail])
 
 
 def _emit(event: dict) -> None:
