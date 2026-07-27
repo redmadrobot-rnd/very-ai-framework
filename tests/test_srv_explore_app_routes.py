@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import pytest
+from srv_explore.token_store import TokenStore
 
 from srv_explore import mcp_server
-from srv_explore.token_store import TokenStore
 
 pytest.importorskip("mcp")
 pytest.importorskip("httpx")
@@ -18,7 +18,7 @@ from starlette.testclient import TestClient  # noqa: E402
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "security_probe", lambda: {})
-    monkeypatch.setattr(mcp_server.profile_store, "STATE", str(tmp_path / "p.json"))
+    monkeypatch.setattr(mcp_server.plugin_store, "STATE", str(tmp_path / "p.json"))
 
     async def fake_run_agent(task, steps=None):  # noqa: ARG001 — агента не спавним
         return "факты", steps or []

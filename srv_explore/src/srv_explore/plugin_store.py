@@ -1,11 +1,11 @@
 """Состояние плагинов в StateDir. Три независимые вещи:
 
-- `profiles.json`  — тумблер On/Off (выдавать креды агенту или нет), default-OFF;
+- `plugins.json`  — тумблер On/Off (выдавать креды агенту или нет), default-OFF;
 - `installed.json` — факт установки + чеклист последнего Install;
 - `creds.json`     — что плагин выдал агенту (ro-DSN, DOCKER_HOST), по плагинам.
 
 Агент получает креды ТОЛЬКО установленных и включённых плагинов (`active_creds`).
-Реестр плагинов сканится из profiles/*.py — имена нигде не зашиты.
+Реестр плагинов сканится из plugins/*.py — имена нигде не зашиты.
 """
 
 from __future__ import annotations
@@ -18,20 +18,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROFILES_DIR = HERE / "profiles"
-STATE = os.environ.get(
-    "SRV_EXPLORE_PROFILE_STATE", "/var/lib/srv-explore/profiles.json"
-)
+PLUGINS_DIR = HERE / "plugins"
+STATE = os.environ.get("SRV_EXPLORE_PLUGIN_STATE", "/var/lib/srv-explore/plugins.json")
 
 _cache: dict | None = None
 
 
 def _load() -> dict:
     mods: dict = {}
-    for f in sorted(PROFILES_DIR.glob("*.py")):
+    for f in sorted(PLUGINS_DIR.glob("*.py")):
         if f.name.startswith("_"):
             continue
-        spec = importlib.util.spec_from_file_location(f"srvx_profile_{f.stem}", f)
+        spec = importlib.util.spec_from_file_location(f"srvx_plugin_{f.stem}", f)
         if not spec or not spec.loader:
             continue
         mod = importlib.util.module_from_spec(spec)

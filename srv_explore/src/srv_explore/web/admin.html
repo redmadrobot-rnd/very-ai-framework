@@ -42,7 +42,7 @@
 
     <h2>Плагины <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— Install настраивает доступ, тумблер выдаёт его агенту</span></h2>
     <div class="card tbl-card">
-      <table id="proftbl"><thead><tr><th>плагин</th><th>что даёт</th><th>установка</th><th>агенту</th></tr></thead><tbody></tbody></table>
+      <table id="plugtbl"><thead><tr><th>плагин</th><th>что даёт</th><th>установка</th><th>агенту</th></tr></thead><tbody></tbody></table>
     </div>
 
     <h2>История сессий <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— последние 100 прогонов, в памяти сервиса</span> <span class="rl"><button class="rl" onclick="loadRuns()">⟳ обновить</button></span></h2>
@@ -87,7 +87,7 @@ async function boot() {
     $("#authmsg").textContent = "";
     $("#authmsg").className = "muted";
     loadSecurity();
-    loadProfiles();
+    loadPlugins();
     loadRuns();
   } catch (e) {
     $("#app").style.display = "none";
@@ -118,10 +118,10 @@ async function loadSecurity() {
   } catch (e) { $("#chips").style.display = "none"; }
 }
 
-let profBusy = false;
-function setProfBusy(b) {
-  profBusy = b;
-  document.querySelectorAll("#proftbl input, #proftbl button").forEach(x => x.disabled = b);
+let plugBusy = false;
+function setPlugBusy(b) {
+  plugBusy = b;
+  document.querySelectorAll("#plugtbl input, #plugtbl button").forEach(x => x.disabled = b);
 }
 
 function checklistHtml(items) {
@@ -132,10 +132,10 @@ function checklistHtml(items) {
   ).join("") + `</div>`;
 }
 
-async function loadProfiles() {
-  const d = await (await api("/admin/api/profiles")).json();
-  const tb = $("#proftbl tbody"); tb.innerHTML = "";
-  for (const p of d.profiles) {
+async function loadPlugins() {
+  const d = await (await api("/admin/api/plugins")).json();
+  const tb = $("#plugtbl tbody"); tb.innerHTML = "";
+  for (const p of d.plugins) {
     const failed = p.checklist && p.checklist.length && !p.installed;
     const mark = p.installed
       ? `<span class="pdot ok" title="${esc(p.at)}">● установлен</span>`
@@ -206,7 +206,7 @@ function toggleChecklist(name) {
 }
 
 async function post(body) {
-  const r = await api("/admin/api/profiles", { method: "POST", body: JSON.stringify(body) });
+  const r = await api("/admin/api/plugins", { method: "POST", body: JSON.stringify(body) });
   return [r, await r.json()];
 }
 
@@ -218,44 +218,44 @@ function formValues(name) {
 }
 
 async function installPlugin(name, fromForm) {
-  if (profBusy) return;
+  if (plugBusy) return;
   const form = $("#form-" + name);          // есть форма — сначала показываем её
   if (form && !fromForm) { form.style.display = ""; return; }
   const values = fromForm ? formValues(name) : {};
-  setProfBusy(true);
+  setPlugBusy(true);
   let r, d;
   try { [r, d] = await post({ name, action: "install", values }); }
-  catch (e) { setProfBusy(false); alert(e.message); return; }
+  catch (e) { setPlugBusy(false); alert(e.message); return; }
   if (d.need_fields) {                   // страховка: обязательное поле пустое
-    setProfBusy(false);
+    setPlugBusy(false);
     if (form) form.style.display = "";
     return;
   }
   if (!r.ok) alert(d.error || "ошибка");
-  setProfBusy(false);
-  await loadProfiles();
+  setPlugBusy(false);
+  await loadPlugins();
 }
 
 async function uninstallPlugin(name) {
-  if (profBusy) return;
+  if (plugBusy) return;
   if (!confirm("Снять установку " + name + "?\n\n"
     + "Креды будут забыты, плагин выключится.\n"
     + "Созданная в ресурсе read-only учётка останется — удалить её можно только вручную.")) return;
-  setProfBusy(true);
+  setPlugBusy(true);
   try { await post({ name, action: "uninstall" }); } catch (e) { alert(e.message); }
-  setProfBusy(false);
-  await loadProfiles();
+  setPlugBusy(false);
+  await loadPlugins();
 }
 
 async function switchPlugin(name, on) {
-  if (profBusy) return;
-  setProfBusy(true);
+  if (plugBusy) return;
+  setPlugBusy(true);
   let r, d;
   try { [r, d] = await post({ name, action: on ? "on" : "off" }); }
-  catch (e) { setProfBusy(false); alert(e.message); return; }
+  catch (e) { setPlugBusy(false); alert(e.message); return; }
   if (!r.ok) alert(d.error || "ошибка");
-  setProfBusy(false);
-  await loadProfiles();
+  setPlugBusy(false);
+  await loadPlugins();
 }
 
 function cancelForm(name) {

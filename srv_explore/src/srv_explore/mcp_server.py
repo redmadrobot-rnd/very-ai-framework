@@ -22,7 +22,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from srv_explore import backstop, profile_store, provision, sandbox, tunnel_keys
+from srv_explore import backstop, plugin_store, provision, sandbox, tunnel_keys
 from srv_explore.token_store import TokenStore
 
 
@@ -113,8 +113,8 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     админке), поэтому при обрыве по таймауту собранное не теряется.
     """
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
-    active = profile_store.active_by_plugin()  # только установленные и включённые
-    reg = profile_store.registry()
+    active = plugin_store.active_by_plugin()  # только установленные и включённые
+    reg = plugin_store.registry()
     for creds in active.values():
         env.update(creds)
     # чтобы агент не гадал, что ему выдали: описание плагина + имена переменных
@@ -249,8 +249,8 @@ def build_app(store: TokenStore | None = None):
         job_id = jobs.start(
             task, label=label, coro_factory=lambda steps: run_agent(task, steps)
         )
-        reg = profile_store.registry()
-        resources = [reg.get(p, p) for p in sorted(profile_store.active_by_plugin())]
+        reg = plugin_store.registry()
+        resources = [reg.get(p, p) for p in sorted(plugin_store.active_by_plugin())]
         return json.dumps(
             {"job_id": job_id, "status": "running", "resources": resources},
             ensure_ascii=False,
@@ -309,8 +309,8 @@ def build_app(store: TokenStore | None = None):
         who = _caller(request)
         if who is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        enabled = profile_store.load()
-        installed = profile_store.installed_all()
+        enabled = plugin_store.load()
+        installed = plugin_store.installed_all()
         runs = jobs.recent(200)
         if who["role"] != "admin":
             runs = [j for j in runs if j["label"] == who["label"]]
@@ -324,7 +324,7 @@ def build_app(store: TokenStore | None = None):
                         "installed": bool(installed.get(n, {}).get("ok")),
                         "enabled": bool(enabled.get(n)),
                     }
-                    for n, d in profile_store.registry().items()
+                    for n, d in plugin_store.registry().items()
                 ],
                 "runs": runs[:20],
             }
@@ -412,12 +412,12 @@ def build_app(store: TokenStore | None = None):
             }
         )
 
-    def _profiles_payload():
+    def _plugins_payload():
         """Сохранённое состояние: установлен (+чеклист) и включён. Живых проб нет."""
-        enabled = profile_store.load()
-        installed = profile_store.installed_all()
+        enabled = plugin_store.load()
+        installed = plugin_store.installed_all()
         out = []
-        for n, d in profile_store.registry().items():
+        for n, d in plugin_store.registry().items():
             rec = installed.get(n, {})
             out.append(
                 {
@@ -430,9 +430,9 @@ def build_app(store: TokenStore | None = None):
                     "at": rec.get("at", ""),
                 }
             )
-        return JSONResponse({"profiles": out})
+        return JSONResponse({"plugins": out})
 
-    async def admin_profiles(request):
+    async def admin_plugins(request):
         denied = _require_admin(request)
         if denied:
             return denied
@@ -441,7 +441,7 @@ def build_app(store: TokenStore | None = None):
             name = body.get("name", "")
             action = body.get("action", "")
             values = body.get("values") or {}
-            if name not in profile_store.registry():
+            if name not in plugin_store.registry():
                 return JSONResponse({"error": "неизвестный плагин"}, status_code=404)
             async with prov_lock:  # установка/переключение строго последовательны
                 try:
@@ -455,7 +455,7 @@ def build_app(store: TokenStore | None = None):
                     elif action == "uninstall":
                         await asyncio.to_thread(provision.uninstall, name)
                     elif action in ("on", "off"):
-                        if action == "on" and not profile_store.is_installed(name):
+                        if action == "on" and not plugin_store.is_installed(name):
                             return JSONResponse(
                                 {"error": "плагин не установлен"}, status_code=400
                             )
@@ -466,7 +466,7 @@ def build_app(store: TokenStore | None = None):
                         )
                 except (OSError, KeyError, RuntimeError) as e:
                     return JSONResponse({"error": f"provision: {e}"}, status_code=500)
-        return _profiles_payload()
+        return _plugins_payload()
 
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
@@ -497,7 +497,7 @@ def build_app(store: TokenStore | None = None):
             Route("/admin/api/users/remove", admin_user_remove, methods=["POST"]),
             Route("/admin/api/runs", admin_runs),
             Route("/admin/api/security", admin_security),
-            Route("/admin/api/profiles", admin_profiles, methods=["GET", "POST"]),
+            Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
         middleware=[Middleware(SplitAuth)],

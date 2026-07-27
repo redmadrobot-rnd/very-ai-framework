@@ -72,7 +72,7 @@ ensure_env_kv SRV_EXPLORE_PORT 8765
 ensure_env_kv SRV_EXPLORE_CWD /
 ensure_env_kv SRV_EXPLORE_PROMPT "$APP_DIR/srv_explore/agent_prompt.md"
 ensure_env_kv SRV_EXPLORE_TOKENS "$STATE_DIR/tokens.json"
-ensure_env_kv SRV_EXPLORE_PROFILE_STATE "$STATE_DIR/profiles.json"
+ensure_env_kv SRV_EXPLORE_PLUGIN_STATE "$STATE_DIR/plugins.json"
 ensure_env_kv SRV_EXPLORE_PUBLIC_HOST "$(hostname -I 2>/dev/null | awk '{print $1}')"
 ensure_env_kv SRV_EXPLORE_PROXY "http://127.0.0.1:3128"
 ensure_env_kv SRV_EXPLORE_TRUSTED_DOMAINS ""

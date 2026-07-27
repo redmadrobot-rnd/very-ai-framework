@@ -184,8 +184,8 @@ flowchart TB
 | `guard.py` | гигиена команд (метасимволы, `/dev/*`) |
 | `plugin_api.py` | контракт плагина — см. [PLUGINS.md](PLUGINS.md) |
 | `provision.py` | раннер установки плагина, вычистка секретов |
-| `profile_store.py` | состояние: On/Off, чеклист, креды |
-| `profiles/*.py` | сами плагины |
+| `plugin_store.py` | состояние: On/Off, чеклист, креды |
+| `plugins/*.py` | сами плагины |
 | `token_store.py`, `tunnel_keys.py` | токены инженеров (на диске только sha256), ключи туннеля |
 | `backstop.py` | пробы харденинга (чипы FileSystem / Network) |
 | `web/` | `admin.html`, `ui.html`, `ui.css` — админка, страница инженера, общие стили |
@@ -291,7 +291,7 @@ stateDiagram-v2
 | `mongo` | юзер с ролью `read` | `insertOne` → `not authorized` |
 | `rabbitmq` | monitoring-юзер management API (AMQP-права never-match) | создание очереди → `403` |
 
-**Свой плагин** — отдельный файл в `profiles/`, ядро трогать не нужно:
+**Свой плагин** — отдельный файл в `plugins/`, ядро трогать не нужно:
 см. **[PLUGINS.md](PLUGINS.md)**.
 
 Что важно знать про снятие: админский DSN мы намеренно выбрасываем сразу после
@@ -312,7 +312,7 @@ stateDiagram-v2
 | `SRV_EXPLORE_AGENT_MAX_SEC` | лимит одного прогона, по умолчанию 600 |
 | `SRV_EXPLORE_PROXY` | адрес форвард-прокси, по умолчанию `127.0.0.1:3128` |
 
-Состояние — в `/var/lib/srv-explore/`: `tokens.json`, `tunnel_keys`, `profiles.json`
+Состояние — в `/var/lib/srv-explore/`: `tokens.json`, `tunnel_keys`, `plugins.json`
 (On/Off), `installed.json` (чеклисты), `creds.json` (креды плагинов, root-only).
 История сессий живёт в памяти сервиса и не переживает рестарт.
 

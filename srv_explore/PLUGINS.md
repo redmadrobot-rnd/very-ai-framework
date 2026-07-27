@@ -1,6 +1,6 @@
 # Как написать свой плагин
 
-Плагин — **один файл** в `profiles/`. Ядро трогать не нужно: реестр сканит каталог,
+Плагин — **один файл** в `plugins/`. Ядро трогать не нужно: реестр сканит каталог,
 форму рисует по объявленным полям, состояние ведёт само.
 
 Задача плагина ровно одна: **выдать агенту read-only доступ к ресурсу и доказать, что
@@ -53,8 +53,8 @@ loopback, а loopback песочнице разрешён — без остан�
 плагин продолжал бы отдавать Docker API. Если доступ существует только через
 выданные креды (все плагины БД), `toggle` не нужен.
 
-Готовые образцы рядом: `profiles/postgres.py` (БД с админским DSN),
-`profiles/docker.py` (без формы, поднимает прокси), `profiles/rabbitmq.py`
+Готовые образцы рядом: `plugins/postgres.py` (БД с админским DSN),
+`plugins/docker.py` (без формы, поднимает прокси), `plugins/rabbitmq.py`
 (админ-доступ локальный).
 
 ---
@@ -235,17 +235,17 @@ FIELDS = [
 
 ```bash
 # 1. положить файл на сервер и перезапустить сервис
-scp src/srv_explore/profiles/clickhouse.py root@host:/opt/srv-explore/srv_explore/profiles/
+scp src/srv_explore/plugins/clickhouse.py root@host:/opt/srv-explore/srv_explore/plugins/
 ssh root@host systemctl restart srv-explore
 
 # 2. плагин должен появиться в списке со своей формой
 curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
-  http://localhost:8765/admin/api/profiles | python3 -m json.tool
+  http://localhost:8765/admin/api/plugins | python3 -m json.tool
 
 # 3. установка (или просто нажать Install в админке)
 curl -s -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"clickhouse","action":"install","values":{"admin_dsn":"..."}}' \
-  http://localhost:8765/admin/api/profiles
+  http://localhost:8765/admin/api/plugins
 ```
 
 Ответ `{"need_fields": [...]}` приходит с кодом **200** и означает, что установка
@@ -256,7 +256,7 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/js
 - все шаги чеклиста зелёные, включая «запись отбита»;
 - повторный Install не создаёт второго юзера;
 - секретов нет в `/var/lib/srv-explore/installed.json`;
-- при Off твоего плагина нет в `profile_store.active_by_plugin()`;
+- при Off твоего плагина нет в `plugin_store.active_by_plugin()`;
 - если ресурс недоступен — установка честно падает на нужном шаге, а не молча.
 
 ---

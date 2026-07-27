@@ -1,18 +1,18 @@
 """Раннер установки плагина: гоняет чеклист, вычищает секреты, хранит креды.
 
 Сервис привилегированный → apt/docker/клиенты зовутся напрямую, без sudo.
-Что именно делает плагин — знает сам плагин (profiles/*.py, контракт в plugin_api).
+Что именно делает плагин — знает сам плагин (plugins/*.py, контракт в plugin_api).
 Первый упавший шаг останавливает установку: креды не сохраняются.
 """
 
 from __future__ import annotations
 
-from srv_explore import profile_store
+from srv_explore import plugin_store
 from srv_explore.plugin_api import Ctx, step
 
 
 def _plugin(pid: str):
-    mod = profile_store.modules().get(pid)
+    mod = plugin_store.modules().get(pid)
     if mod is None:
         raise KeyError(pid)
     return mod
@@ -63,17 +63,17 @@ def install(pid: str, values: dict | None = None) -> dict:
         s["detail"] = ctx.redact(str(s.get("detail", "")))
 
     if ok and ctx.creds:
-        profile_store.set_creds(pid, ctx.creds)
+        plugin_store.set_creds(pid, ctx.creds)
         # установка оставляет ресурс поднятым (иначе нечем пробовать) — вернуть
         # его в состояние, которое сейчас показывает тумблер
-        _apply_toggle(pid, profile_store.load().get(pid, False))
+        _apply_toggle(pid, plugin_store.load().get(pid, False))
     else:
         # Неудача или переустановка без кред: прежние могли протухнуть, чистим —
         # иначе агент получил бы креды прошлой установки под свежим чеклистом.
-        profile_store.drop_creds(pid)
+        plugin_store.drop_creds(pid)
         if not ok:
-            profile_store.set_enabled(pid, False)
-    profile_store.set_checklist(pid, checklist, ok)
+            plugin_store.set_enabled(pid, False)
+    plugin_store.set_checklist(pid, checklist, ok)
     return {"ok": ok, "checklist": checklist}
 
 
@@ -93,7 +93,7 @@ def _apply_toggle(pid: str, enabled: bool) -> None:
 def toggle(pid: str, enabled: bool) -> None:
     """Тумблер On/Off. Ресурс закрывается до того, как забываются креды."""
     _apply_toggle(pid, enabled)
-    profile_store.set_enabled(pid, enabled)
+    plugin_store.set_enabled(pid, enabled)
 
 
 def uninstall(pid: str) -> None:
@@ -108,6 +108,6 @@ def uninstall(pid: str) -> None:
             teardown(Ctx())
         except Exception as e:  # noqa: BLE001 — наверх как ошибка эндпоинта
             raise RuntimeError(f"{pid}: ресурс не снят — {e}") from e
-    profile_store.drop_creds(pid)
-    profile_store.set_enabled(pid, False)
-    profile_store.drop_checklist(pid)
+    plugin_store.drop_creds(pid)
+    plugin_store.set_enabled(pid, False)
+    plugin_store.drop_checklist(pid)

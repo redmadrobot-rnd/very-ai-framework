@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-
-from srv_explore import plugin_api, profile_store, provision
 from srv_explore.plugin_api import field, step
+
+from srv_explore import plugin_api, plugin_store, provision
 
 _ADMIN = "postgresql://admin:s3cr3t@h:5432/shop"  # pragma: allowlist secret
 _SSL = "postgresql://admin:secret@h:5432/shop?ssl=on"  # pragma: allowlist secret
@@ -84,9 +84,9 @@ class _Empty:
 @pytest.fixture(autouse=True)
 def _state(tmp_path, monkeypatch):
     """Изолированный StateDir + подменённый реестр плагинов."""
-    monkeypatch.setattr(profile_store, "STATE", str(tmp_path / "profiles.json"))
+    monkeypatch.setattr(plugin_store, "STATE", str(tmp_path / "plugins.json"))
     monkeypatch.setattr(
-        profile_store,
+        plugin_store,
         "modules",
         lambda: {
             "good": _Good,
@@ -104,8 +104,8 @@ def test_install_ok_saves_creds():
     res = provision.install("good")
     assert res["ok"] is True
     assert [s["name"] for s in res["checklist"]] == ["клиент", "ресурс"]
-    assert profile_store.is_installed("good")
-    assert profile_store.creds_all()["good"] == {"GOOD_DSN": "x://ro"}
+    assert plugin_store.is_installed("good")
+    assert plugin_store.creds_all()["good"] == {"GOOD_DSN": "x://ro"}
 
 
 def test_install_stops_at_first_failure():
@@ -113,8 +113,8 @@ def test_install_stops_at_first_failure():
     assert res["ok"] is False
     names = [s["name"] for s in res["checklist"]]
     assert names == ["клиент", "ресурс"]  # третий шаг не выполнялся
-    assert not profile_store.is_installed("bad")
-    assert "bad" not in profile_store.creds_all()  # креды не сохранены
+    assert not plugin_store.is_installed("bad")
+    assert "bad" not in plugin_store.creds_all()  # креды не сохранены
 
 
 def test_install_catches_plugin_exception():
@@ -141,7 +141,7 @@ def test_secrets_never_reach_stored_checklist():
     detail = res["checklist"][0]["detail"]
     assert _ADMIN not in detail  # введённый секрет вырезан
     assert "***" in detail
-    stored = profile_store.installed_all()["leaky"]["checklist"][0]["detail"]
+    stored = plugin_store.installed_all()["leaky"]["checklist"][0]["detail"]
     assert _ADMIN not in stored  # и на диск он тоже не попал
     assert "pw=***" in stored  # сгенерированный пароль тоже
 
@@ -149,21 +149,21 @@ def test_secrets_never_reach_stored_checklist():
 def test_plugin_without_steps_is_not_installed():
     res = provision.install("empty")
     assert res["ok"] is False
-    assert not profile_store.is_installed("empty")
+    assert not plugin_store.is_installed("empty")
 
 
 def test_reinstall_without_creds_drops_previous_ones(monkeypatch):
     """Плагин выдал креды, потом переустановка прошла молча — старые креды должны
     уйти, иначе агент получит доступ, которого свежая установка не подтверждала."""
     provision.install("good")
-    profile_store.set_enabled("good", True)
-    assert profile_store.active_creds() == {"GOOD_DSN": "x://ro"}
+    plugin_store.set_enabled("good", True)
+    assert plugin_store.active_creds() == {"GOOD_DSN": "x://ro"}
 
     monkeypatch.setattr(_Good, "install", _Mute.install)
     res = provision.install("good")
     assert res["ok"] is True
-    assert profile_store.creds_all() == {}
-    assert profile_store.active_creds() == {}
+    assert plugin_store.creds_all() == {}
+    assert plugin_store.active_creds() == {}
 
 
 def test_unknown_plugin_raises():
@@ -173,11 +173,11 @@ def test_unknown_plugin_raises():
 
 def test_active_creds_only_installed_and_enabled():
     provision.install("good")
-    assert profile_store.active_creds() == {}  # установлен, но выключен
-    profile_store.set_enabled("good", True)
-    assert profile_store.active_creds() == {"GOOD_DSN": "x://ro"}
-    profile_store.set_enabled("good", False)
-    assert profile_store.active_creds() == {}
+    assert plugin_store.active_creds() == {}  # установлен, но выключен
+    plugin_store.set_enabled("good", True)
+    assert plugin_store.active_creds() == {"GOOD_DSN": "x://ro"}
+    plugin_store.set_enabled("good", False)
+    assert plugin_store.active_creds() == {}
 
 
 class _Gated:
@@ -206,11 +206,11 @@ def test_toggle_closes_resource_not_just_creds():
 
     provision.toggle("gated", True)
     assert _Gated.calls[-1] is True
-    assert profile_store.active_creds() == {"GATED": "x"}
+    assert plugin_store.active_creds() == {"GATED": "x"}
 
     provision.toggle("gated", False)
     assert _Gated.calls[-1] is False
-    assert profile_store.active_creds() == {}
+    assert plugin_store.active_creds() == {}
 
 
 def test_toggle_failure_does_not_claim_success(monkeypatch):
@@ -225,16 +225,16 @@ def test_toggle_failure_does_not_claim_success(monkeypatch):
     monkeypatch.setattr(_Gated, "toggle", staticmethod(boom))
     with pytest.raises(RuntimeError):
         provision.toggle("gated", False)
-    assert profile_store.load()["gated"] is True  # состояние не соврало
+    assert plugin_store.load()["gated"] is True  # состояние не соврало
 
 
 def test_uninstall_clears_state():
     provision.install("good")
-    profile_store.set_enabled("good", True)
+    plugin_store.set_enabled("good", True)
     provision.uninstall("good")
-    assert not profile_store.is_installed("good")
-    assert profile_store.active_creds() == {}
-    assert profile_store.load()["good"] is False
+    assert not plugin_store.is_installed("good")
+    assert plugin_store.active_creds() == {}
+    assert plugin_store.load()["good"] is False
 
 
 # --- DSN-хелперы контракта ------------------------------------------------------
