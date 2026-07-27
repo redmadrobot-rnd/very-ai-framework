@@ -2,6 +2,8 @@
 # Вендоренный CLI фреймворка (gitmark) — это инструмент, а не исходники проекта;
 # не гоняем по нему линтер в адаптирующемся репо.
 extend-exclude = [".claude/skills"]
+# src-раскладка srv_explore: без этого isort считает пакет сторонним и тасует импорты
+src = [".", "srv_explore/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

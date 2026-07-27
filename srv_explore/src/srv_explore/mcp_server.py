@@ -19,6 +19,7 @@ import json
 import os
 import secrets
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,17 +36,15 @@ WEB = HERE / "web"
 ADMIN_PAGE = WEB / "admin.html"
 UI_PAGE = WEB / "ui.html"
 UI_CSS = WEB / "ui.css"
-# Оболочки страниц отдаются без токена, данные за ними — только по токену.
-PUBLIC_PATHS = frozenset({"/", "/ui.css"})
 
 
 def public_host() -> str:
     return os.environ.get("SRV_EXPLORE_PUBLIC_HOST", "<host>")
 
 
-# Инженерный токен текущего запроса: ставит SplitAuth, читает srv_explore (label).
-CURRENT_TOKEN: contextvars.ContextVar = contextvars.ContextVar(
-    "srv_explore_token", default=None
+# Кто пришёл — ставит Gate, читают хендлеры и MCP-инструмент (label в прогоне).
+CURRENT: contextvars.ContextVar = contextvars.ContextVar(
+    "srv_explore_identity", default=None
 )
 
 
@@ -80,6 +79,50 @@ def admin_authorized(authorization: str | None) -> bool:
     if not provided:
         return False
     return secrets.compare_digest(provided, configured)
+
+
+@dataclass(frozen=True)
+class Identity:
+    """Кто прислал запрос. Роль решает, что ему покажут и куда пустят."""
+
+    label: str
+    role: str  # admin | engineer
+    created: str = ""  # когда выдан токен; у админского даты нет
+
+
+def identify(authorization: str | None, store: TokenStore) -> Identity | None:
+    """Единственное место, где читается предъявленный токен."""
+    if admin_authorized(authorization):
+        return Identity("admin", "admin")
+    rec = authorize(authorization, store)
+    return Identity(rec.label, "engineer", rec.created) if rec else None
+
+
+# Допуск по пути: None — пускаем без токена, иначе нужна роль. Вся картина «кто
+# куда пускается» — здесь; хендлеры права не проверяют. Путь с `/` на конце
+# закрывает поддерево, остальные — ровно себя.
+GATE: tuple[tuple[str, str | None], ...] = (
+    ("/", None),  # лендинг: оболочка публична, данные за /app/api/*
+    ("/ui.css", None),
+    ("/admin", None),  # оболочка админки — так же
+    ("/admin/api/", "admin"),
+    ("/app/api/", "engineer"),  # админ проходит тоже: роль старше
+)
+DEFAULT_ROLE = "engineer"  # всё прочее, включая /mcp: без токена нельзя
+
+
+def required_role(path: str) -> str | None:
+    for prefix, role in GATE:
+        if path == prefix:
+            return role
+    for prefix, role in GATE:
+        if len(prefix) > 1 and prefix.endswith("/") and path.startswith(prefix):
+            return role
+    return DEFAULT_ROLE
+
+
+def role_allows(role: str, need: str | None) -> bool:
+    return need is None or role == need or role == "admin"
 
 
 # --- запуск агента в песочнице ------------------------------------------------
@@ -244,8 +287,8 @@ def build_app(store: TokenStore | None = None):
 
         В ответе resources — к чему у него сейчас есть доступ помимо файлов и логов.
         """
-        rec = CURRENT_TOKEN.get()
-        label = rec.label if rec else "?"
+        who = CURRENT.get()
+        label = who.label if who else "?"
         job_id = jobs.start(
             task, label=label, coro_factory=lambda steps: run_agent(task, steps)
         )
@@ -293,30 +336,22 @@ def build_app(store: TokenStore | None = None):
             css = "/* ui.css не найден */"
         return Response(css, media_type="text/css; charset=utf-8", headers=NO_STORE)
 
-    # --- /app: кабинет, по инженерному или админскому токену ---
-    def _caller(request):
-        """Кто пришёл: метка + роль. Админ-токен пускается и сюда — отдельный
-        инженерный ему для этого не нужен, но видит он больше (все прогоны)."""
-        auth = request.headers.get("authorization")
-        if admin_authorized(auth):
-            return {"label": "admin", "role": "admin", "created": ""}
-        rec = authorize(auth, tokens)
-        if rec is None:
-            return None
-        return {"label": rec.label, "role": "engineer", "created": rec.created}
+    # --- /app: кабинет. Кого сюда пускать, решил Gate; тут только рендер по роли ---
+    def _who(request) -> Identity:
+        return request.scope["srvx_identity"]
 
     async def app_me(request):
-        who = _caller(request)
-        if who is None:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        who = _who(request)
         enabled = plugin_store.load()
         installed = plugin_store.installed_all()
         runs = jobs.recent(200)
-        if who["role"] != "admin":
-            runs = [j for j in runs if j["label"] == who["label"]]
+        if who.role != "admin":
+            runs = [j for j in runs if j["label"] == who.label]
         return JSONResponse(
             {
-                **who,
+                "label": who.label,
+                "role": who.role,
+                "created": who.created,
                 "plugins": [
                     {
                         "name": n,
@@ -331,43 +366,31 @@ def build_app(store: TokenStore | None = None):
         )
 
     async def app_ask(request):
-        who = _caller(request)
-        if who is None:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        who = _who(request)
         body = await request.json()
         task = (body.get("task") or "").strip()
         if not task:
             return JSONResponse({"error": "task обязателен"}, status_code=400)
         job_id = jobs.start(
-            task, label=who["label"], coro_factory=lambda steps: run_agent(task, steps)
+            task, label=who.label, coro_factory=lambda steps: run_agent(task, steps)
         )
         return JSONResponse({"job_id": job_id})
 
     async def app_ask_status(request):
-        who = _caller(request)
-        if who is None:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        who = _who(request)
         job = jobs.get(request.path_params["job_id"])
         # чужой прогон неотличим от несуществующего; админ видит любой
-        if job is None or (who["role"] != "admin" and job["label"] != who["label"]):
+        if job is None or (who.role != "admin" and job["label"] != who.label):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
         return JSONResponse(job)
 
-    # --- /admin: HTML-оболочка публична, данные — за админ-токеном ---
-    def _require_admin(request):
-        if not admin_authorized(request.headers.get("authorization")):
-            return JSONResponse({"error": "admin unauthorized"}, status_code=401)
-        return None
-
+    # --- /admin: оболочка публична, данные — под ролью admin (см. GATE) ---
     async def admin_page(request):  # noqa: ARG001
         return _page(
             ADMIN_PAGE, "<h1>srv-explore admin</h1><p>admin.html не найден</p>"
         )
 
     async def admin_users(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
         if request.method == "POST":
             body = await request.json()
             label = (body.get("label") or "").strip()
@@ -386,25 +409,16 @@ def build_app(store: TokenStore | None = None):
         return JSONResponse({"users": tunnel_keys.list_users()})
 
     async def admin_user_remove(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
         body = await request.json()
         label = (body.get("label") or "").strip()
         removed_key = tunnel_keys.remove_label(label)
         removed_tok = tokens.revoke_label(label)
         return JSONResponse({"key_removed": removed_key, "tokens_revoked": removed_tok})
 
-    async def admin_runs(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
+    async def admin_runs(request):  # noqa: ARG001
         return JSONResponse({"runs": jobs.recent(100)})
 
-    async def admin_security(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
+    async def admin_security(request):  # noqa: ARG001
         return JSONResponse(
             {
                 "status": backstop.status(security),
@@ -433,9 +447,6 @@ def build_app(store: TokenStore | None = None):
         return JSONResponse({"plugins": out})
 
     async def admin_plugins(request):
-        denied = _require_admin(request)
-        if denied:
-            return denied
         if request.method == "POST":
             body = await request.json()
             name = body.get("name", "")
@@ -468,16 +479,20 @@ def build_app(store: TokenStore | None = None):
                     return JSONResponse({"error": f"provision: {e}"}, status_code=500)
         return _plugins_payload()
 
-    class SplitAuth(BaseHTTPMiddleware):
+    class Gate(BaseHTTPMiddleware):
+        """Единственная проверка доступа: путь → нужная роль (GATE) → токен → роль.
+
+        Личность кладётся в scope (её читают хендлеры) и в contextvar (её читает
+        MCP-инструмент, у которого объекта запроса нет).
+        """
+
         async def dispatch(self, request, call_next):
-            path = request.url.path
-            # /admin и /app гейтят себя сами (админ-токен / инженерный токен)
-            if path in PUBLIC_PATHS or path.startswith(("/admin", "/app/")):
-                return await call_next(request)
-            rec = authorize(request.headers.get("authorization"), tokens)
-            if rec is None:
+            need = required_role(request.url.path)
+            who = identify(request.headers.get("authorization"), tokens)
+            if need is not None and (who is None or not role_allows(who.role, need)):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
-            CURRENT_TOKEN.set(rec)
+            request.scope["srvx_identity"] = who
+            CURRENT.set(who)
             return await call_next(request)
 
     @contextlib.asynccontextmanager
@@ -500,7 +515,7 @@ def build_app(store: TokenStore | None = None):
             Route("/admin/api/plugins", admin_plugins, methods=["GET", "POST"]),
             Mount("/", app=mcp.streamable_http_app()),
         ],
-        middleware=[Middleware(SplitAuth)],
+        middleware=[Middleware(Gate)],
         lifespan=lifespan,
     )
 

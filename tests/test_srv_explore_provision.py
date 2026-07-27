@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from srv_explore.plugin_api import field, step
 
 from srv_explore import plugin_api, plugin_store, provision
+from srv_explore.plugin_api import field, step
 
 _ADMIN = "postgresql://admin:s3cr3t@h:5432/shop"  # pragma: allowlist secret
 _SSL = "postgresql://admin:secret@h:5432/shop?ssl=on"  # pragma: allowlist secret

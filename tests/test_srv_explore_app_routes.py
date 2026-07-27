@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import pytest
-from srv_explore.token_store import TokenStore
 
 from srv_explore import mcp_server
+from srv_explore.token_store import TokenStore
 
 pytest.importorskip("mcp")
 pytest.importorskip("httpx")
@@ -56,6 +56,15 @@ def test_app_api_needs_a_valid_token(app):
 def test_mcp_still_gated(app):
     client, _, _ = app
     assert client.get("/mcp").status_code == 401
+
+
+def test_engineer_token_does_not_reach_admin_api(app):
+    client, alice, _ = app
+    for path in ("/admin/api/users", "/admin/api/runs", "/admin/api/plugins"):
+        assert client.get(path, headers=_auth(alice)).status_code == 401, path
+        assert client.get(path).status_code == 401, path
+    # оболочка админки публична: токен вводят уже в неё
+    assert client.get("/admin").status_code == 200
 
 
 def test_me_reports_own_label_and_plugin_status_without_creds(app):

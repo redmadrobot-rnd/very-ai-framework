@@ -71,3 +71,41 @@ def test_worker_prompt_loads():
     prompt = agent_worker._prompt()
     assert prompt
     assert "чтение" in prompt.lower() or "read" in prompt.lower()
+
+
+# --- таблица допусков (чистая, без ASGI) --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path,need",
+    [
+        ("/", None),
+        ("/ui.css", None),
+        ("/admin", None),
+        ("/admin/api/users", "admin"),
+        ("/admin/api/plugins", "admin"),
+        ("/app/api/me", "engineer"),
+        ("/app/api/ask/job_1", "engineer"),
+        ("/mcp", "engineer"),
+        ("/что-то/новое", "engineer"),  # неизвестный путь закрыт по умолчанию
+    ],
+)
+def test_required_role(path, need):
+    assert mcp_server.required_role(path) == need
+
+
+def test_admin_role_passes_engineer_gates():
+    assert mcp_server.role_allows("admin", "engineer")
+    assert mcp_server.role_allows("engineer", "engineer")
+    assert not mcp_server.role_allows("engineer", "admin")
+    assert mcp_server.role_allows("engineer", None)
+
+
+def test_identify_prefers_admin_then_engineer(tmp_path, monkeypatch):
+    monkeypatch.setenv("SRV_EXPLORE_ADMIN_TOKEN", "adm_x")
+    store = TokenStore(tmp_path / "t.json")
+    _, token = store.issue("alice")
+    assert mcp_server.identify("Bearer adm_x", store).role == "admin"
+    who = mcp_server.identify(f"Bearer {token}", store)
+    assert (who.role, who.label) == ("engineer", "alice")
+    assert mcp_server.identify("Bearer nope", store) is None
