@@ -30,6 +30,7 @@ FIELDS = [
 PACKAGES = ["mongodb-mongosh"]  # есть только в репозитории MongoDB, не в базовой Ubuntu
 CREDS_ENV = "MONGO_INSPECTOR_DSN"
 RO_USER = "srvx_readonly"
+PROBE_COLL = "_srvx_probe"
 MONGOSH_VERSION = "2.3.8"  # фолбэк-установка, если пакета в apt нет
 MONGOSH_BIN = "/usr/local/bin/mongosh"
 
@@ -119,7 +120,11 @@ def install(ctx):
     # Отказ засчитывается только по явному сигналу авторизации: просто ненулевой
     # код мог бы прийти от обрыва связи или ошибки в самом скрипте, и тогда
     # «не смогли записать» означало бы «не смогли дотянуться».
-    rc, out, err = _eval(ctx, ro_dsn, "db._srvx_probe.insertOne({x: 1})")
+    # getCollection, а не db.<имя>: имя с подчёркиванием как свойство не резолвится,
+    # и проба падала бы на TypeError вместо отказа по правам.
+    rc, out, err = _eval(
+        ctx, ro_dsn, f'db.getCollection("{PROBE_COLL}").insertOne({{x: 1}})'
+    )
     text = (err + out).lower()
     denied = rc != 0 and ("not authorized" in text or "unauthorized" in text)
     if rc == 0:
