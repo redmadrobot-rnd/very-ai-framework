@@ -122,12 +122,13 @@ nav.tabs button {
 nav.tabs button:hover { background: #ffffff08; color: var(--tx); }
 nav.tabs button[aria-selected="true"] { color: var(--tx); border-bottom-color: var(--acc); }
 
-/* ch считается от своего font-size, поэтому у hero и lead он разный:
-   держим одинаковую ширину строки в px, иначе абзац выглядит вдвое уже заголовка. */
+/* Ширину не ограничиваем: вводный блок идёт по той же сетке, что схема и карточки
+   ниже. Ограничение в ch тут вредно — оно считается от своего font-size, и абзац
+   оказывался вдвое уже заголовка. */
 .hero { font-size: 1.5rem; font-weight: 650; line-height: 1.3; margin: 0 0 .7rem;
-  letter-spacing: -.01em; max-width: 60rem; }
+  letter-spacing: -.01em; }
 .hero em { color: var(--acc); font-style: normal; }
-.lead { color: var(--mut); max-width: 60rem; margin: 0 0 1.4rem; }
+.lead { color: var(--mut); margin: 0 0 1.4rem; }
 .flow { width: 100%; height: auto; margin: .4rem 0 1.6rem; }
 /* quick start: нумерованные шаги с пояснением и командой */
 .steps-num { margin: 0; padding-left: 1.4rem; display: grid; gap: .8rem; }
