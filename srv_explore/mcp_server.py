@@ -32,6 +32,10 @@ def _now() -> str:
 
 HERE = Path(__file__).resolve().parent
 ADMIN_PAGE = HERE / "admin.html"
+UI_PAGE = HERE / "ui.html"
+UI_CSS = HERE / "ui.css"
+# Оболочки страниц отдаются без токена, данные за ними — только по токену.
+PUBLIC_PATHS = frozenset({"/", "/ui.css"})
 
 
 def public_host() -> str:
@@ -211,7 +215,7 @@ def build_app(store: TokenStore | None = None):
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import HTMLResponse, JSONResponse
+    from starlette.responses import HTMLResponse, JSONResponse, Response
     from starlette.routing import Mount, Route
 
     tokens = store or TokenStore()
@@ -262,6 +266,71 @@ def build_app(store: TokenStore | None = None):
             return json.dumps({"error": "unknown job_id"}, ensure_ascii=False)
         return json.dumps(job, ensure_ascii=False)
 
+    # --- страницы: HTML/CSS публичны, данные — за токеном ---
+    # no-store: апгрейд сервиса должен быть виден сразу, без «почисти кэш»
+    NO_STORE = {"Cache-Control": "no-store"}
+
+    def _page(path: Path, fallback: str):
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            body = fallback
+        return HTMLResponse(body, headers=NO_STORE)
+
+    async def ui_page(request):  # noqa: ARG001
+        return _page(UI_PAGE, "<h1>srv-explore</h1><p>ui.html не найден</p>")
+
+    async def ui_css(request):  # noqa: ARG001
+        try:
+            css = UI_CSS.read_text(encoding="utf-8")
+        except OSError:
+            css = "/* ui.css не найден */"
+        return Response(css, media_type="text/css; charset=utf-8", headers=NO_STORE)
+
+    # --- /app: кабинет инженера, за его же инженерным токеном ---
+    def _caller(request):
+        return authorize(request.headers.get("authorization"), tokens)
+
+    async def app_me(request):
+        rec = _caller(request)
+        if rec is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        active = profile_store.active_by_plugin()
+        return JSONResponse(
+            {
+                "label": rec.label,
+                "created": rec.created,
+                "plugins": [
+                    {"name": n, "desc": d, "active": n in active}
+                    for n, d in profile_store.registry().items()
+                ],
+                "runs": [j for j in jobs.recent(200) if j["label"] == rec.label][:20],
+            }
+        )
+
+    async def app_ask(request):
+        rec = _caller(request)
+        if rec is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        body = await request.json()
+        task = (body.get("task") or "").strip()
+        if not task:
+            return JSONResponse({"error": "task обязателен"}, status_code=400)
+        job_id = jobs.start(
+            task, label=rec.label, coro_factory=lambda steps: run_agent(task, steps)
+        )
+        return JSONResponse({"job_id": job_id})
+
+    async def app_ask_status(request):
+        rec = _caller(request)
+        if rec is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        job = jobs.get(request.path_params["job_id"])
+        # чужой прогон неотличим от несуществующего: инженер видит только свои
+        if job is None or job["label"] != rec.label:
+            return JSONResponse({"error": "unknown job_id"}, status_code=404)
+        return JSONResponse(job)
+
     # --- /admin: HTML-оболочка публична, данные — за админ-токеном ---
     def _require_admin(request):
         if not admin_authorized(request.headers.get("authorization")):
@@ -269,11 +338,9 @@ def build_app(store: TokenStore | None = None):
         return None
 
     async def admin_page(request):  # noqa: ARG001
-        try:
-            html = ADMIN_PAGE.read_text(encoding="utf-8")
-        except OSError:
-            html = "<h1>srv-explore admin</h1><p>admin.html не найден</p>"
-        return HTMLResponse(html)
+        return _page(
+            ADMIN_PAGE, "<h1>srv-explore admin</h1><p>admin.html не найден</p>"
+        )
 
     async def admin_users(request):
         denied = _require_admin(request)
@@ -404,8 +471,9 @@ def build_app(store: TokenStore | None = None):
     class SplitAuth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path.startswith("/admin"):
-                return await call_next(request)  # /admin гейтит себя сам (админ-токен)
+            # /admin и /app гейтят себя сами (админ-токен / инженерный токен)
+            if path in PUBLIC_PATHS or path.startswith(("/admin", "/app/")):
+                return await call_next(request)
             rec = authorize(request.headers.get("authorization"), tokens)
             if rec is None:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -419,6 +487,11 @@ def build_app(store: TokenStore | None = None):
 
     return Starlette(
         routes=[
+            Route("/", ui_page),
+            Route("/ui.css", ui_css),
+            Route("/app/api/me", app_me),
+            Route("/app/api/ask", app_ask, methods=["POST"]),
+            Route("/app/api/ask/{job_id}", app_ask_status),
             Route("/admin", admin_page),
             Route("/admin/api/users", admin_users, methods=["GET", "POST"]),
             Route("/admin/api/users/remove", admin_user_remove, methods=["POST"]),

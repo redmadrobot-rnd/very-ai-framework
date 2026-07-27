@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>srv-explore</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/ui.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>srv-explore <span class="dot">·</span> <span class="muted" style="font-weight:400">readonly-эксплорер сервера</span></h1>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-about" aria-selected="true" data-tab="about">Что это</button>
+    <button role="tab" id="tab-me" aria-selected="false" data-tab="me">Мой доступ</button>
+    <button role="tab" id="tab-ask" aria-selected="false" data-tab="ask">Спросить сервер</button>
+  </nav>
+
+  <!-- ── Что это ─────────────────────────────────────────────── -->
+  <section id="pane-about">
+    <p class="hero">Спроси сервер словами и получи факты — <em>не имея доступа к серверу</em>.</p>
+    <p class="lead">На хосте живёт агент, который умеет только читать: файлы, логи, конфиги, код,
+      контейнеры, содержимое баз. Ты присылаешь вопрос, он выполняет команды чтения и возвращает
+      сырые факты — что запустил и что это показало. Изменить он ничего не может, и это не
+      обещание модели, а свойство окружения, в которое он заперт.</p>
+
+    <svg class="flow" viewBox="0 28 880 158" role="img"
+         aria-label="Схема: инженер через SSH-туннель обращается к сервису, тот спавнит агента в песочнице, агент только читает хост">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="#8b949e"/>
+        </marker>
+        <style>
+          .bx { fill:#161b22; stroke:#30363d; }
+          .bxa { fill:#161b22; stroke:#2f81f7; }
+          .t { fill:#e6edf3; font: 600 13px system-ui, sans-serif; }
+          .s { fill:#8b949e; font: 400 11px system-ui, sans-serif; }
+          .ln { stroke:#8b949e; stroke-width:1.4; fill:none; marker-end:url(#a); }
+        </style>
+      </defs>
+
+      <rect class="bx" x="4" y="52" width="150" height="62" rx="9"/>
+      <text class="t" x="79" y="78" text-anchor="middle">Инженер</text>
+      <text class="s" x="79" y="96" text-anchor="middle">свой Claude Code</text>
+
+      <path class="ln" d="M158 83 H246"/>
+      <text class="s" x="202" y="74" text-anchor="middle">SSH-туннель</text>
+      <text class="s" x="202" y="104" text-anchor="middle">+ токен</text>
+
+      <rect class="bx" x="250" y="40" width="160" height="86" rx="9"/>
+      <text class="t" x="330" y="70" text-anchor="middle">Сервис</text>
+      <text class="s" x="330" y="88" text-anchor="middle">root, на хосте</text>
+      <text class="s" x="330" y="106" text-anchor="middle">выдаёт доступы</text>
+
+      <path class="ln" d="M414 83 H502"/>
+      <text class="s" x="458" y="74" text-anchor="middle">одноразовая</text>
+      <text class="s" x="458" y="104" text-anchor="middle">песочница</text>
+
+      <rect class="bxa" x="506" y="40" width="160" height="86" rx="9"/>
+      <text class="t" x="586" y="70" text-anchor="middle">Агент</text>
+      <text class="s" x="586" y="88" text-anchor="middle">без прав, RO-ФС</text>
+      <text class="s" x="586" y="106" text-anchor="middle">без интернета</text>
+
+      <path class="ln" d="M670 83 H758"/>
+      <text class="s" x="714" y="74" text-anchor="middle">только</text>
+      <text class="s" x="714" y="104" text-anchor="middle">чтение</text>
+
+      <rect class="bx" x="762" y="40" width="114" height="86" rx="9"/>
+      <text class="t" x="819" y="70" text-anchor="middle">Хост</text>
+      <text class="s" x="819" y="88" text-anchor="middle">логи · файлы</text>
+      <text class="s" x="819" y="106" text-anchor="middle">docker · БД</text>
+
+      <path class="ln" d="M586 134 V160 H79 V120"/>
+      <text class="s" x="333" y="176" text-anchor="middle">факты: какие команды и что показали</text>
+    </svg>
+
+    <div class="cols">
+      <div class="card">
+        <h3>Что умеет</h3>
+        <ul class="can">
+          <li>читать файлы, конфиги, логи, journald</li>
+          <li>искать по коду на хосте</li>
+          <li>смотреть контейнеры: <code>ps</code>, <code>logs</code>, <code>inspect</code></li>
+          <li>делать SELECT-запросы в подключённые базы</li>
+          <li><code>systemctl status</code>, <code>df</code>, <code>ps</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Что не сможет</h3>
+        <ul class="cant">
+          <li>записать файл — ФС смонтирована только на чтение</li>
+          <li>изменить данные в базе — роль без прав записи</li>
+          <li>рестартнуть сервис или контейнер</li>
+          <li>получить root, перезагрузить хост</li>
+          <li>уйти в интернет — егресс обрублен ядром</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Как начать</h3>
+        <p class="muted" style="margin:0 0 .5rem">Нужен токен от администратора — он же
+          регистрирует твой SSH-ключ.</p>
+        <ol class="muted" style="margin:0;padding-left:1.1rem">
+          <li>поднять туннель до хоста</li>
+          <li>вставить токен во вкладке «Мой доступ»</li>
+          <li>спрашивать здесь или подключить MCP к своему Claude Code</li>
+        </ol>
+      </div>
+    </div>
+
+    <h2>Почему это безопасно</h2>
+    <div class="card">
+      <p style="margin:0 0 .7rem">Агенту не <em>запрещают</em> писать — ему <b>нечем</b>.
+        Каждый способ что-то изменить закрыт на уровне ресурса, а не уговорами:</p>
+      <table>
+        <thead><tr><th>Попытка</th><th>Что произойдёт</th></tr></thead>
+        <tbody>
+          <tr><td>записать файл</td><td class="muted">ядро вернёт <code>read-only file system</code></td></tr>
+          <tr><td>INSERT / UPDATE / DROP</td><td class="muted">база откажет: <code>permission denied</code></td></tr>
+          <tr><td>рестарт контейнера</td><td class="muted">прокси Docker API отдаст <code>403</code></td></tr>
+          <tr><td>отправить данные наружу</td><td class="muted">егресс закрыт, наружу только API модели</td></tr>
+          <tr><td>повысить права</td><td class="muted">непривилегированный пользователь, <code>NoNewPrivileges</code></td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin:.8rem 0 0;font-size:.88rem">Каждый прогон и каждая
+        выполненная команда попадают в историю — видно, что именно спрашивали и что агент делал.</p>
+    </div>
+  </section>
+
+  <!-- ── Мой доступ ──────────────────────────────────────────── -->
+  <section id="pane-me" hidden>
+    <div class="card bar">
+      <label>Токен доступа <input id="tok" type="password" placeholder="srvx_…" size="32"></label>
+      <button class="primary" data-act="login">Войти</button>
+      <button data-act="logout" hidden id="logout">Выйти</button>
+      <span id="authmsg" class="muted"></span>
+    </div>
+
+    <div id="me" hidden>
+      <h2>Кто я</h2>
+      <div class="card">
+        <dl class="kv">
+          <dt>метка</dt><dd id="me-label"></dd>
+          <dt>токен выдан</dt><dd id="me-created"></dd>
+        </dl>
+      </div>
+
+      <h2>Что доступно агенту</h2>
+      <div class="card tbl-card">
+        <table><thead><tr><th>Ресурс</th><th>Что даёт</th><th>Статус</th></tr></thead>
+        <tbody id="restbl"></tbody></table>
+      </div>
+      <p class="muted" style="font-size:.88rem">Файлы, логи и journald доступны всегда.
+        Остальное включает администратор — если нужного ресурса нет, попроси его.</p>
+
+      <h2>Мои прогоны <span class="rl"><button class="rl" data-act="refresh">⟳ обновить</button></span></h2>
+      <div class="card tbl-card">
+        <table><thead><tr><th class="chevcol"></th><th>Время</th><th>Вопрос</th><th>Статус</th></tr></thead>
+        <tbody id="runstbl"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Спросить сервер ─────────────────────────────────────── -->
+  <section id="pane-ask" hidden>
+    <div id="ask-gate" class="card">
+      <p style="margin:0">Нужен токен доступа — вставь его во вкладке
+        <b>«Мой доступ»</b>.</p>
+    </div>
+    <div id="ask" hidden>
+      <div class="card">
+        <textarea id="q" rows="3" placeholder="Напр.: почему nginx отдаёт 502 последний час? какие контейнеры перезапускались за сутки?"></textarea>
+        <div class="bar" style="margin-top:.6rem">
+          <button class="primary" id="askbtn" data-act="ask">Спросить</button>
+          <span id="askmsg" class="muted"></span>
+        </div>
+        <p class="muted" style="font-size:.88rem;margin:.7rem 0 0">Формулируй цель, а не команду:
+          агент сам решит, чем смотреть. Прогон занимает от 20 секунд до нескольких минут.</p>
+      </div>
+      <div id="askout" hidden>
+        <h2>Ход работы</h2>
+        <div class="card"><div id="asksteps" class="steps"></div></div>
+        <h2>Ответ</h2>
+        <div class="card"><pre id="askresult" class="answer muted">…</pre></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const ESC_RE = new RegExp("[" + Object.keys(ESCAPES).join("") + "]", "g");
+function esc(s) { return (s ?? "").toString().replace(ESC_RE, c => ESCAPES[c]); }
+function $(s) { return document.querySelector(s); }
+function tok() { return sessionStorage.getItem("srvxtok") || ""; }
+
+async function api(path, opts) {
+  const r = await fetch(path, {
+    ...(opts || {}),
+    headers: {"Authorization": "Bearer " + tok(), "Content-Type": "application/json"},
+  });
+  if (r.status === 401) throw new Error("токен не принят — проверь у администратора");
+  if (!r.ok) throw new Error("ошибка сервера " + r.status);
+  return r.json();
+}
+
+// --- вкладки ---
+function showTab(name) {
+  for (const t of document.querySelectorAll("nav.tabs button")) {
+    const on = t.dataset.tab === name;
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    $("#pane-" + t.dataset.tab).hidden = !on;
+  }
+  location.hash = name;
+}
+document.querySelector("nav.tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]");
+  if (b) showTab(b.dataset.tab);
+});
+
+// --- вход ---
+async function login() {
+  const v = $("#tok").value.trim();
+  if (!v) return;
+  sessionStorage.setItem("srvxtok", v);
+  $("#authmsg").textContent = "проверяю…";
+  $("#authmsg").className = "muted";
+  try {
+    const d = await api("/app/api/me");
+    $("#authmsg").textContent = "";
+    $("#tok").value = "";
+    $("#tok").closest("label").hidden = true;
+    $("#logout").hidden = false;
+    document.querySelector('[data-act="login"]').hidden = true;
+    $("#me").hidden = false;
+    $("#ask").hidden = false;
+    $("#ask-gate").hidden = true;
+    render(d);
+  } catch (e) {
+    sessionStorage.removeItem("srvxtok");
+    $("#authmsg").textContent = e.message;
+    $("#authmsg").className = "err";
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem("srvxtok");
+  location.reload();
+}
+
+function render(d) {
+  $("#me-label").textContent = d.label;
+  $("#me-created").textContent = d.created || "—";
+
+  const rt = $("#restbl"); rt.innerHTML = "";
+  for (const p of d.plugins) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><code class="id">${esc(p.name)}</code></td>
+      <td class="muted">${esc(p.desc)}</td>
+      <td>${p.active
+        ? '<span class="pdot ok">● доступен</span>'
+        : '<span class="pdot off">— не подключён</span>'}</td>`;
+    rt.appendChild(tr);
+  }
+  renderRuns(d.runs);
+}
+
+function renderRuns(runs) {
+  const tb = $("#runstbl"); tb.innerHTML = "";
+  if (!runs.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="muted">Пока ничего не спрашивал.</td></tr>';
+    return;
+  }
+  runs.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.className = "srow";
+    tr.dataset.act = "run"; tr.dataset.arg = String(i);
+    tr.innerHTML = `<td class="chevcol"><span class="chev" id="chev-${i}">▸</span></td>
+      <td class="muted">${esc((r.started || "").replace("T", " ").replace("+00:00", ""))}</td>
+      <td>${esc(r.task)}</td>
+      <td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td>`;
+    tb.appendChild(tr);
+    const det = document.createElement("tr");
+    det.className = "drow"; det.id = "run-" + i; det.hidden = true;
+    det.innerHTML = `<td colspan="4"><div class="detail">
+      ${stepsHtml(r.steps)}
+      <pre class="answer" style="margin-top:.7rem">${esc(r.result || r.error || "")}</pre>
+      </div></td>`;
+    tb.appendChild(det);
+  });
+}
+
+function stepsHtml(steps) {
+  if (!steps || !steps.length) return '<span class="muted">команд ещё нет</span>';
+  return steps.map(s => `<div class="step">
+    <span class="st ${s.ok ? "done" : "error"}">${s.ok ? "ok" : "deny"}</span>
+    <code>${esc(s.cmd)}</code>
+    ${s.ok ? "" : `<span class="muted">${esc(s.reason || "")}</span>`}</div>`).join("");
+}
+
+// --- вопрос ---
+let polling = null;
+async function ask() {
+  const task = $("#q").value.trim();
+  if (!task || polling) return;
+  $("#askbtn").disabled = true;
+  $("#askmsg").textContent = "агент работает…";
+  $("#askmsg").className = "muted";
+  $("#askout").hidden = false;
+  $("#asksteps").innerHTML = '<span class="muted">запускаю…</span>';
+  $("#askresult").textContent = "…";
+  let job;
+  try {
+    job = (await api("/app/api/ask", {method: "POST", body: JSON.stringify({task})})).job_id;
+  } catch (e) {
+    finishAsk(e.message, true);
+    return;
+  }
+  polling = setInterval(async () => {
+    let d;
+    try { d = await api("/app/api/ask/" + job); }
+    catch (e) { finishAsk(e.message, true); return; }
+    $("#asksteps").innerHTML = stepsHtml(d.steps);
+    if (d.status === "running") return;
+    $("#askresult").textContent = d.result || d.error || "(пусто)";
+    $("#askresult").className = "answer";
+    finishAsk(d.status === "done" ? "готово" : "прогон прерван", d.status !== "done");
+  }, 4000);
+}
+
+function finishAsk(msg, isErr) {
+  clearInterval(polling); polling = null;
+  $("#askbtn").disabled = false;
+  $("#askmsg").textContent = msg;
+  $("#askmsg").className = isErr ? "err" : "muted";
+}
+
+// --- делегирование: значения не подставляются в inline-обработчики ---
+const ACTIONS = {
+  login, logout, ask,
+  refresh: () => api("/app/api/me").then(render).catch(e => alert(e.message)),
+  run: i => {
+    const d = $("#run-" + i), c = $("#chev-" + i);
+    d.hidden = !d.hidden;
+    c.className = d.hidden ? "chev" : "chev open";
+  },
+};
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (el && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el.dataset.arg);
+});
+$("#tok").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+
+showTab(location.hash.slice(1) || "about");
+if (tok()) login();
+</script>
+</body>
+</html>

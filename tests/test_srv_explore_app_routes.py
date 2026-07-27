@@ -1,0 +1,88 @@
+"""Границы доступа страниц: оболочка и стили публичны, данные — за токеном, а свой
+прогон инженер видит только свой. Пускаем настоящее ASGI-приложение, потому что
+проверяем именно маршрутизацию с middleware (порядок Route/Mount легко перепутать).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from srv_explore import mcp_server
+from srv_explore.token_store import TokenStore
+
+pytest.importorskip("mcp")
+pytest.importorskip("httpx")
+from starlette.testclient import TestClient  # noqa: E402
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_server, "security_probe", lambda: {})
+    monkeypatch.setattr(mcp_server.profile_store, "STATE", str(tmp_path / "p.json"))
+
+    async def fake_run_agent(task, steps=None):  # noqa: ARG001 — агента не спавним
+        return "факты", steps or []
+
+    monkeypatch.setattr(mcp_server, "run_agent", fake_run_agent)
+    store = TokenStore(tmp_path / "tokens.json")
+    _, alice = store.issue("alice")
+    _, bob = store.issue("bob")
+    with TestClient(mcp_server.build_app(store)) as client:
+        yield client, alice, bob
+
+
+def _auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_landing_and_css_are_public(app):
+    client, _, _ = app
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "srv-explore" in page.text
+    css = client.get("/ui.css")
+    assert css.status_code == 200
+    assert "text/css" in css.headers["content-type"]
+
+
+def test_app_api_needs_engineer_token(app):
+    client, _, _ = app
+    assert client.get("/app/api/me").status_code == 401
+    assert client.get("/app/api/me", headers=_auth("srvx_nope")).status_code == 401
+
+
+def test_mcp_still_gated(app):
+    client, _, _ = app
+    assert client.get("/mcp").status_code == 401
+
+
+def test_me_reports_own_label_and_plugin_names_only(app):
+    client, alice, _ = app
+    d = client.get("/app/api/me", headers=_auth(alice)).json()
+    assert d["label"] == "alice"
+    assert d["runs"] == []
+    assert {"name", "desc", "active"} == set(d["plugins"][0])
+
+
+def test_engineer_sees_only_his_own_runs(app):
+    client, alice, bob = app
+    job = client.post("/app/api/ask", headers=_auth(alice), json={"task": "что там"})
+    job_id = job.json()["job_id"]
+    assert client.get(f"/app/api/ask/{job_id}", headers=_auth(alice)).status_code == 200
+    # чужой прогон неотличим от несуществующего
+    assert client.get(f"/app/api/ask/{job_id}", headers=_auth(bob)).status_code == 404
+    assert client.get(f"/app/api/ask/{job_id}").status_code == 401
+    assert client.get("/app/api/me", headers=_auth(bob)).json()["runs"] == []
+    assert client.get("/app/api/me", headers=_auth(alice)).json()["runs"][0][
+        "task"
+    ] == ("что там")
+
+
+def test_ask_requires_task(app):
+    client, alice, _ = app
+    assert (
+        client.post(
+            "/app/api/ask", headers=_auth(alice), json={"task": " "}
+        ).status_code
+        == 400
+    )
