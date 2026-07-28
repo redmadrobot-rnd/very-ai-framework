@@ -225,9 +225,6 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
   namespaced by repo name so several projects can share one host).
 - For private GHCR images, deploy logs in with `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`).
 
-> **srv-explore** (readonly server explorer) — **отдельный модуль**, не часть сетапа
-> фреймворка. Ставится своим воркфлоу; см. `srv_explore/README.md`.
-
 ## Step 9. Verify the install
 
 - **dev-flow / KB skills** — the agent sees `/kb-doc`, `/kb-build`, `/kb-graph` and the skills
