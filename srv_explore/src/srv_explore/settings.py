@@ -45,8 +45,7 @@ FIELDS = [
         required=False,
         hint=(
             "в обход прокси, на уровне ядра. Loopback и приватные сети "
-            "(10/8, 172.16/12, 192.168/16) открыты и так; 0.0.0.0/0 снимает "
-            "egress целиком"
+            "(10/8, 172.16/12, 192.168/16) открыты и так; 0.0.0.0/0 не принимается"
         ),
     ),
 ]
@@ -108,9 +107,14 @@ def parse_cidrs(raw: str) -> tuple[list[str], str]:
     nets = []
     for c in split_list(raw):
         try:
-            nets.append(str(ipaddress.ip_network(c, strict=False)))
+            net = ipaddress.ip_network(c, strict=False)
         except ValueError as e:
             return [], f"не разбирается как адрес или подсеть: {c} ({e})"
+        if net.prefixlen == 0:
+            # 0.0.0.0/0 или ::/0 — это не «подсеть», а снятие egress-firewall
+            # целиком, в обход доменного allowlist. Опечатка не должна такое уметь.
+            return [], f"{c} открывает весь интернет — так нельзя, перечисли подсети"
+        nets.append(str(net))
     return nets, ""
 
 

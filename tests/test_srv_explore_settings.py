@@ -56,6 +56,13 @@ def test_parse_cidrs_rejects_garbage():
     assert nets == [] and err
 
 
+def test_parse_cidrs_rejects_whole_internet():
+    # /0 — это снятие egress-firewall, а не подсеть; опечатка не должна такое уметь
+    for raw in ("0.0.0.0/0", "::/0", "203.0.113.10, 0.0.0.0/0"):
+        nets, err = settings.parse_cidrs(raw)
+        assert nets == [] and "весь интернет" in err
+
+
 def test_validate_reports_first_error():
     assert settings.validate({"egress_domains": "ok.example.com"}) == ""
     assert settings.validate({"egress_cidrs": "nope"})
