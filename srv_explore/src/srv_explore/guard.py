@@ -43,6 +43,18 @@ def forbidden_path(tok: str) -> bool:
     return p.startswith("/dev/") or p.startswith("/proc/kcore")
 
 
+def check_file_path(path: str) -> tuple[bool, str]:
+    """Гигиена для файловых инструментов (Read/Grep/Glob): те же спецфайлы, что
+    режет Bash-путь. Иначе агент прочитал бы /proc/self/environ мимо гарда и достал
+    токен модели с кредами прямо из окружения воркера."""
+    if path and forbidden_path(path.strip()):
+        return False, (
+            f"{path}: спецфайл (устройство, поток, окружение) — "
+            "бери нужное обычными путями"
+        )
+    return True, "ok"
+
+
 def check_command_string(command: str) -> tuple[bool, str]:
     for m, why in DANGEROUS.items():
         if m in command:

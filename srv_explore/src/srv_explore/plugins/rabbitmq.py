@@ -9,6 +9,8 @@
 и каналы видны, менять нельзя ничего.
 """
 
+import json
+
 from srv_explore.plugin_api import step
 
 ID = "rabbitmq"
@@ -122,14 +124,45 @@ def install(ctx):
     rc, _, err = _ctl(ctx, ["set_permissions", "-p", VHOST, RO_USER, DENY, DENY, DENY])
     yield step("AMQP-права сняты", rc == 0, err.strip()[:160] or f"все три = {DENY}")
 
-    # Брокер должен подтвердить, что применил именно never-match: опечатка в
-    # шаблоне тихо вернула бы юзеру право publish.
+    # Права на ОСТАЛЬНЫХ vhost снимаем совсем: остаточная строка с write/configure на
+    # другом vhost (тот же пароль в management-URL) дала бы запись мимо проверки '/'.
+    rc, vh_out, _ = _ctl(ctx, ["list_vhosts", "--formatter", "json"])
+    cleared = []
+    try:
+        for v in json.loads(vh_out or "[]"):
+            name = v.get("name")
+            if name and name != VHOST:
+                _ctl(ctx, ["clear_permissions", "-p", name, RO_USER])
+                cleared.append(name)
+    except ValueError:
+        pass
+
+    # Брокер должен подтвердить: единственная оставшаяся строка прав — '/' с тремя
+    # never-match. Проверяем ВСЕ строки (не одну), иначе опечатка в шаблоне или
+    # пропущенный vhost тихо вернули бы юзеру write.
     rc, out, _ = _ctl(ctx, ["list_user_permissions", RO_USER, "--formatter", "json"])
-    applied = rc == 0 and out.count(f'"{DENY}"') == 3
+    try:
+        rows = json.loads(out or "[]")
+    except ValueError:
+        rows = None
+    applied = (
+        rc == 0
+        and rows is not None
+        and len(rows) >= 1
+        and all(
+            r.get("configure") == DENY
+            and r.get("write") == DENY
+            and r.get("read") == DENY
+            for r in rows
+        )
+    )
+    extra = f"; очищено vhost: {', '.join(cleared)}" if cleared else ""
     yield step(
         "права подтверждены брокером",
         applied,
-        f"configure/write/read = {DENY}" if applied else out.strip()[:160],
+        (f"все vhost: configure/write/read = {DENY}{extra}")
+        if applied
+        else out.strip()[:160],
     )
 
     code, body = _api(ctx, "GET", "/api/queues", pw)

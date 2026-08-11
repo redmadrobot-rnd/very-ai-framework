@@ -16,6 +16,7 @@ from srv_explore import guard
 
 HERE = Path(__file__).resolve().parent
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
+FILE_TOOLS = ["Read", "Grep", "Glob"]  # берут путь, не команду — свой гард
 MAX_TURNS = 40  # потолок шагов агента; общий потолок по времени — sandbox.MAX_SEC
 
 
@@ -74,6 +75,33 @@ def _hook(steps):
     return pretooluse
 
 
+def _file_hook(steps):
+    """Гард для Read/Grep/Glob: у них не команда, а путь (file_path/path). Без этого
+    хука `Read /proc/self/environ` прочитал бы окружение воркера в обход Bash-гарда."""
+
+    async def pretooluse(input_data, tool_use_id, context):  # noqa: ARG001
+        name = input_data.get("tool_name")
+        if name not in FILE_TOOLS:
+            return {}
+        ti = input_data.get("tool_input") or {}
+        path = ti.get("file_path") or ti.get("path") or ""
+        ok, reason = guard.check_file_path(path)
+        if ok:
+            return {}
+        rec = {"cmd": f"{name} {path}", "ok": False, "reason": reason}
+        steps.append(rec)
+        _emit({"type": "step", **rec})
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    return pretooluse
+
+
 async def _run(task: str) -> dict:
     from claude_agent_sdk import (
         AssistantMessage,
@@ -89,7 +117,15 @@ async def _run(task: str) -> dict:
         system_prompt=_prompt(),
         allowed_tools=ALLOWED_TOOLS,
         permission_mode="dontAsk",
-        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_hook(steps)])]},
+        hooks={
+            "PreToolUse": [
+                HookMatcher(matcher="Bash", hooks=[_hook(steps)]),
+                *[
+                    HookMatcher(matcher=t, hooks=[_file_hook(steps)])
+                    for t in FILE_TOOLS
+                ],
+            ]
+        },
         cwd=os.environ.get("SRV_EXPLORE_CWD", "/"),
         setting_sources=[],
         max_turns=MAX_TURNS,

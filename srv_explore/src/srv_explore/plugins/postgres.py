@@ -26,11 +26,16 @@ CREDS_ENV = "PG_INSPECTOR_DSN"
 RO_ROLE = "srvx_readonly"  # фиксированное имя — повторный Install не плодит юзеров
 
 # Идемпотентно: роль есть — ротировать пароль, нет — создать. pg_read_all_data = чтение.
+# DROP OWNED снимает ВСЕ ранее выданные роли привилегии в этой БД (в т.ч. ручной
+# GRANT INSERT/UPDATE от прошлой жизни роли) — иначе ротация пароля оставила бы
+# writable-доступ, который проба на DDL могла бы не поймать. RO-роль объектов не
+# владеет, так что дропать нечего, кроме грантов.
 SETUP = (
     "DO $$ BEGIN "
     "IF EXISTS (SELECT FROM pg_roles WHERE rolname='{role}') "
     "THEN ALTER ROLE {role} LOGIN PASSWORD '{pw}'; "
     "ELSE CREATE ROLE {role} LOGIN PASSWORD '{pw}'; END IF; END $$; "
+    "DROP OWNED BY {role}; "
     'GRANT CONNECT ON DATABASE "{db}" TO {role}; '
     "GRANT pg_read_all_data TO {role};"
 )

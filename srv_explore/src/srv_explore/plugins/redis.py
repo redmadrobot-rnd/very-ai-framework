@@ -75,12 +75,14 @@ def install(ctx):
     yield step("ACL поддерживается", rc == 0, (err or out).strip()[:160] or "Redis ≥ 6")
 
     pw = ctx.password()
-    # Команда с паролем идёт через stdin, а не argv. resetpass обязателен: без него
-    # ">pw" ДОБАВЛЯЕТ пароль к списку, прежние остаются валидными и переустановка
-    # не ротирует доступ.
+    # Два шага. Первый — `reset`: SETUSER инкрементальный, resetpass снял бы только
+    # пароли, а остаточное правило вроде `+set` от прошлой жизни юзера пережило бы
+    # переустановку (set не в @dangerous) и SET-проба ниже прошла бы ложно-зелёной.
+    # `reset` сносит ВСЁ (правила, пароли, ключи, каналы), второй SETUSER строит RO
+    # с нуля: только @read по всем ключам, без @dangerous и без каналов.
     setuser = (
-        f"ACL SETUSER {RO_USER} on resetpass >{pw} "
-        f"~* &* +@read -@dangerous resetchannels\n"
+        f"ACL SETUSER {RO_USER} reset\n"
+        f"ACL SETUSER {RO_USER} on >{pw} ~* +@read -@dangerous\n"
     )
     rc, out, err = _cli(ctx, admin_dsn, [], stdin_cmd=setuser)
     created = rc == 0 and "ERR" not in (out + err).upper()

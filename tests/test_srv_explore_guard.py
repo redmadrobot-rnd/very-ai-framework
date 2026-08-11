@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from srv_explore.guard import check_command_string
+from srv_explore.guard import check_command_string, check_file_path
 
 # allow: read-only держит ресурс-слой, гард пропускает почти всё.
 ALLOW = [
@@ -79,3 +79,14 @@ def test_env_dump_is_refused():
     # обычное чтение не задето
     assert check_command_string("cat /etc/os-release")[0]
     assert check_command_string("ps -eo pid,args | grep nginx")[0]
+
+
+def test_file_path_guard_blocks_environ_and_devices():
+    """Read/Grep/Glob получают путь, не команду: тот же гард на спецфайлы, иначе
+    `Read /proc/self/environ` достал бы окружение воркера мимо Bash-гарда."""
+    for path in ("/proc/self/environ", "/proc/1/environ", "/dev/sda", "/dev/mem"):
+        ok, _ = check_file_path(path)
+        assert not ok, path
+    # обычные пути и безопасные спецфайлы проходят
+    for path in ("/var/log/app.log", "/etc/os-release", "/dev/null", ""):
+        assert check_file_path(path)[0], path
