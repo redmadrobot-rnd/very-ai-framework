@@ -241,7 +241,7 @@ PROGRESS_SEC = 20  # шаг heartbeat: без него долгий вызов �
 # Потолок одновременных прогонов агента: каждый держит песочницу и сессию модели до
 # 600с. Без лимита один токен наспавнил бы их пачкой и выжрал хост и API-квоту.
 # Лишние ждут в очереди на семафоре (статус job — running), не запускаясь.
-MAX_CONCURRENT_RUNS = int(os.environ.get("SRV_EXPLORE_MAX_CONCURRENT_RUNS", "4"))
+MAX_CONCURRENT_RUNS = int(os.environ.get("SRV_EXPLORE_MAX_CONCURRENT_RUNS", "16"))
 _run_sem: asyncio.Semaphore | None = None
 
 
