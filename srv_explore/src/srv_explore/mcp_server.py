@@ -216,7 +216,8 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     def spawn():
         return sandbox.run(worker, input_text=task, extra_env=env, on_line=on_line)
 
-    rc, out, err = await asyncio.to_thread(spawn)
+    async with runs_gate():  # ждём слот, если уже MAX_CONCURRENT_RUNS в работе
+        rc, out, err = await asyncio.to_thread(spawn)
     result = sandbox.redact(final.get("result") or "", sensitive)
     if result.strip():
         return result, steps
@@ -236,6 +237,20 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
 # оборвут, иначе вызывающий не узнает, где смотреть собранное.
 WAIT_SEC = 480
 PROGRESS_SEC = 20  # шаг heartbeat: без него долгий вызов рвут по таймауту клиента
+
+# Потолок одновременных прогонов агента: каждый держит песочницу и сессию модели до
+# 600с. Без лимита один токен наспавнил бы их пачкой и выжрал хост и API-квоту.
+# Лишние ждут в очереди на семафоре (статус job — running), не запускаясь.
+MAX_CONCURRENT_RUNS = int(os.environ.get("SRV_EXPLORE_MAX_CONCURRENT_RUNS", "4"))
+_run_sem: asyncio.Semaphore | None = None
+
+
+def runs_gate() -> asyncio.Semaphore:
+    global _run_sem
+    if _run_sem is None:
+        _run_sem = asyncio.Semaphore(MAX_CONCURRENT_RUNS)
+    return _run_sem
+
 
 CMD_MAX_SEC = os.environ.get("SRV_EXPLORE_CMD_MAX_SEC", "60")
 CMD_MAX_OUT = 30_000  # вывод уезжает в контекст вызывающего, а не человеку на экран
@@ -523,7 +538,13 @@ def build_app(store: TokenStore | None = None):
         уже отвечают на часть вопроса.
         """
         job = jobs.get(job_id)
-        if job is None:
+        # чужой прогон неотличим от несуществующего (как в app_ask_status): в result
+        # факты прода, утёкший job_id не должен открывать чужой прогон. Админ — любой.
+        who = CURRENT.get()
+        mine = who is not None and (
+            who.role == "admin" or job and job["label"] == who.label
+        )
+        if job is None or not mine:
             return json.dumps({"error": "unknown job_id"}, ensure_ascii=False)
         return json.dumps(job, ensure_ascii=False)
 

@@ -25,16 +25,22 @@ FIELDS = [
 CREDS_ENV = "PG_INSPECTOR_DSN"
 RO_ROLE = "srvx_readonly"  # фиксированное имя — повторный Install не плодит юзеров
 
-# Идемпотентно: роль есть — ротировать пароль, нет — создать. pg_read_all_data = чтение.
-# DROP OWNED снимает ВСЕ ранее выданные роли привилегии в этой БД (в т.ч. ручной
-# GRANT INSERT/UPDATE от прошлой жизни роли) — иначе ротация пароля оставила бы
-# writable-доступ, который проба на DDL могла бы не поймать. RO-роль объектов не
-# владеет, так что дропать нечего, кроме грантов.
+# Идемпотентно = сброс до нуля, не «сменить пароль». Роль могла жить раньше с
+# write-доступом, и его надо снять ДВУМЯ путями:
+#   - DROP OWNED — прямые гранты (ручной GRANT INSERT на таблицу) в этой БД;
+#   - цикл REVOKE — членства в ролях (pg_write_all_data или прикладная writer-роль):
+#     их DROP OWNED НЕ трогает, а унаследованный через них DML пережил бы ротацию
+#     пароля, и проба на CREATE TABLE могла бы его не поймать.
+# Только после сброса выдаём единственное право — pg_read_all_data (чтение).
 SETUP = (
     "DO $$ BEGIN "
     "IF EXISTS (SELECT FROM pg_roles WHERE rolname='{role}') "
     "THEN ALTER ROLE {role} LOGIN PASSWORD '{pw}'; "
     "ELSE CREATE ROLE {role} LOGIN PASSWORD '{pw}'; END IF; END $$; "
+    "DO $$ DECLARE r record; BEGIN "
+    "FOR r IN SELECT roleid::regrole AS rn FROM pg_auth_members "
+    "WHERE member = '{role}'::regrole LOOP "
+    "EXECUTE format('REVOKE %s FROM {role}', r.rn); END LOOP; END $$; "
     "DROP OWNED BY {role}; "
     'GRANT CONNECT ON DATABASE "{db}" TO {role}; '
     "GRANT pg_read_all_data TO {role};"

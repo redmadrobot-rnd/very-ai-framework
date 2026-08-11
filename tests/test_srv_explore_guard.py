@@ -73,12 +73,18 @@ def test_env_dump_is_refused():
         "env | grep DSN",
         "cat /proc/self/environ",
         "cat /proc/1/environ",
+        # обход каталога процесса, а не прямой путь к environ
+        "grep -R CLAUDE_CODE_OAUTH_TOKEN /proc/self",
+        "grep -rl DSN /proc/1",
+        "ls /proc",
     ):
         ok, reason = check_command_string(cmd)
         assert not ok, cmd
-    # обычное чтение не задето
+    # обычное чтение не задето, включая листовые файлы /proc вне процессов
     assert check_command_string("cat /etc/os-release")[0]
     assert check_command_string("ps -eo pid,args | grep nginx")[0]
+    assert check_command_string("cat /proc/meminfo")[0]
+    assert check_command_string("cat /proc/loadavg")[0]
 
 
 def test_file_path_guard_blocks_environ_and_devices():
@@ -87,6 +93,15 @@ def test_file_path_guard_blocks_environ_and_devices():
     for path in ("/proc/self/environ", "/proc/1/environ", "/dev/sda", "/dev/mem"):
         ok, _ = check_file_path(path)
         assert not ok, path
+    # каталог процесса как цель рекурсивного Grep — тоже deny
+    for path in ("/proc/self", "/proc/1", "/proc"):
+        assert not check_file_path(path)[0], path
     # обычные пути и безопасные спецфайлы проходят
-    for path in ("/var/log/app.log", "/etc/os-release", "/dev/null", ""):
+    for path in (
+        "/var/log/app.log",
+        "/etc/os-release",
+        "/dev/null",
+        "/proc/meminfo",
+        "",
+    ):
         assert check_file_path(path)[0], path

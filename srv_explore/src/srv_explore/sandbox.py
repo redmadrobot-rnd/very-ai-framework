@@ -18,6 +18,9 @@ from pathlib import Path
 
 AGENT_USER = "srvx-agent"  # заводит install.sh
 MAX_SEC = os.environ.get("SRV_EXPLORE_AGENT_MAX_SEC", "600")  # анти-подвисание
+# Жёсткий потолок вывода: `yes` или дамп гигабайтного лога иначе копит в память до
+# RuntimeMaxSec, прежде чем mcp_server срежет до 30 КБ. Читаем с капом и убиваем юнит.
+MAX_OUTPUT_BYTES = int(os.environ.get("SRV_EXPLORE_MAX_OUTPUT_BYTES", str(1_000_000)))
 PROXY = os.environ.get("SRV_EXPLORE_PROXY", "http://127.0.0.1:3128")
 # каталог-родитель пакета srv_explore — чтобы `python -m srv_explore.*` в песочнице
 # нашёл пакет независимо от cwd (RO-FS читать не мешает).
@@ -154,11 +157,9 @@ def run(
         cmd += ["-p", f"EnvironmentFile={envfile}"]
         cmd += list(args)
 
-        if on_line is None:
-            p = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
-            return p.returncode, p.stdout, p.stderr
-
-        # stderr — во временный файл: чтение одного пайпа может залипнуть на другом
+        # Всегда Popen с капом по байтам: capture_output буферил бы `yes`/дамп лога
+        # в память до RuntimeMaxSec. stderr — во временный файл: чтение одного пайпа
+        # может залипнуть на другом.
         with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as errf:
             proc = subprocess.Popen(
                 cmd,
@@ -171,13 +172,24 @@ def run(
                 proc.stdin.write(input_text)
             proc.stdin.close()
             out: list[str] = []
+            total = 0
+            capped = False
             for line in proc.stdout:
+                total += len(line.encode("utf-8", "replace"))
+                if total > MAX_OUTPUT_BYTES:
+                    capped = True
+                    proc.kill()
+                    break
                 out.append(line)
-                on_line(line)
+                if on_line is not None:
+                    on_line(line)
             proc.stdout.close()
             rc = proc.wait()
             errf.seek(0)
-            return rc, "".join(out), errf.read()
+            err = errf.read()
+            if capped:
+                err += f"\n[вывод срезан на {MAX_OUTPUT_BYTES} байт, процесс убит]"
+            return rc, "".join(out), err
     finally:
         try:
             os.unlink(envfile)

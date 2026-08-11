@@ -38,9 +38,24 @@ def forbidden_path(tok: str) -> bool:
     p = tok.split("=", 1)[-1].strip("\"'") if "=" in tok else tok
     if p in SAFE_DEV or p.startswith("/dev/fd/"):
         return False
-    if p.startswith("/proc/") and p.endswith("/environ"):
-        return True  # окружение агента: там токен модели и креды плагинов
-    return p.startswith("/dev/") or p.startswith("/proc/kcore")
+    if p.startswith("/dev/") or p.startswith("/proc/kcore"):
+        return True
+    # /proc: environ достаётся не только прямым путём `/proc/self/environ`, но и
+    # обходом каталога процесса (`grep -R /proc/self`, Grep path=/proc). Режем:
+    #   - любой путь, оканчивающийся на environ (прямое чтение);
+    #   - каталог процесса как цель (весь /proc, /proc/self, /proc/<pid>) — рекурсия
+    #     оттуда дойдёт до environ.
+    # Конкретные безопасные файлы (/proc/self/cmdline, /proc/meminfo, /proc/net/*)
+    # остаются читаемыми.
+    parts = p.strip("/").split("/")
+    if parts and parts[0] == "proc":
+        if len(parts) == 1 or parts[-1] == "environ":
+            return True  # весь /proc, или прямой environ любого процесса
+        if len(parts) == 2 and (
+            parts[1] in ("self", "thread-self") or parts[1].isdigit()
+        ):
+            return True  # каталог процесса как цель рекурсии
+    return False
 
 
 def check_file_path(path: str) -> tuple[bool, str]:
