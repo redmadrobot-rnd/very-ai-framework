@@ -75,6 +75,24 @@ def available() -> bool:
     return shutil.which("systemd-run") is not None and os.geteuid() == 0
 
 
+def _expand_secrets(secrets) -> set[str]:
+    """Значения + их чувствительные составные части. DSN редактится целиком, но в
+    выводе клиент может показать один только пароль — режем и его отдельно."""
+    from urllib.parse import unquote, urlsplit
+
+    out = set()
+    for s in secrets:
+        value = str(s or "")
+        if not value:
+            continue
+        out.add(value)
+        if "://" in value:
+            pw = urlsplit(value).password
+            if pw:
+                out.update((pw, unquote(pw)))
+    return out
+
+
 def redact(text: str, secrets) -> str:
     """Затереть значения кредов в выводе.
 
@@ -82,7 +100,7 @@ def redact(text: str, secrets) -> str:
     уезжает вызывающему целиком. Поэтому значения, которые мы сами положили в
     окружение, из вывода вырезаем — это последний рубеж, а не единственный.
     """
-    for value in sorted({str(s) for s in secrets if s}, key=len, reverse=True):
+    for value in sorted(_expand_secrets(secrets), key=len, reverse=True):
         if len(value) >= 8:  # короткие значения (порт, имя юзера) — не секрет
             text = text.replace(value, "***")
     return text

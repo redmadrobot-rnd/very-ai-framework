@@ -88,3 +88,12 @@ def test_redact_leaves_short_values_alone():
     # порт или имя юзера — не секрет; затирать их значило бы портить вывод
     assert sandbox.redact("port 5432 user ro", ["5432", "ro"]) == "port 5432 user ro"
     assert sandbox.redact("tok=abcdefgh12", ["abcdefgh12"]) == "tok=***"
+
+
+def test_redact_catches_password_component_of_dsn():
+    # клиент может показать не весь DSN, а один пароль — режем и его,
+    # в том числе URL-декодированную форму
+    dsn = "postgresql://ro:sup%40er_secret1@db:5432/app"  # pragma: allowlist secret
+    out = sandbox.redact("auth failed for sup@er_secret1 (raw sup%40er_secret1)", [dsn])
+    assert "sup@er_secret1" not in out
+    assert "sup%40er_secret1" not in out

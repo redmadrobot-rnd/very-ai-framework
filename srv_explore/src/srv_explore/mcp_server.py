@@ -178,7 +178,12 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
     env = {k: os.environ[k] for k in _AGENT_PASS_ENV if os.environ.get(k)}
     active = plugin_store.active_by_plugin()  # только установленные и включённые
     reg = plugin_store.registry()
-    env.update(plugin_creds())
+    creds = plugin_creds()
+    env.update(creds)
+    # то, что уходит агенту в env, но не должно уехать наружу в его отчёте: токен
+    # модели (гард ловит env-дамп, но не `echo $VAR`) и ro-креды плагинов. redact —
+    # бэкстоп на пути агента, как и для srv_explore_cmd.
+    sensitive = [os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""), *creds.values()]
     # чтобы агент не гадал, что ему выдали: описание плагина + имена переменных
     env["SRV_EXPLORE_RESOURCES"] = "; ".join(
         f"{reg.get(pid, pid)} — {', '.join(creds)}"
@@ -212,11 +217,12 @@ async def run_agent(task: str, steps: list | None = None) -> tuple[str, list]:
         return sandbox.run(worker, input_text=task, extra_env=env, on_line=on_line)
 
     rc, out, err = await asyncio.to_thread(spawn)
-    if (final.get("result") or "").strip():
-        return final["result"], steps
+    result = sandbox.redact(final.get("result") or "", sensitive)
+    if result.strip():
+        return result, steps
     # результата нет: статус задачи должен быть error, а не done с обрезком.
     # Собранные шаги не теряются — steps это тот же список, что лежит в job.
-    tail = (err or out).strip()[:600]
+    tail = sandbox.redact((err or out).strip()[:600], sensitive)
     if rc != 0:
         raise RuntimeError(
             f"агент прерван (код {rc}, лимит прогона {sandbox.MAX_SEC}s); "
@@ -271,14 +277,64 @@ async def run_command(cmd: str) -> dict:
 # --- реестр задач (job-id + poll) --------------------------------------------
 
 
-class JobRegistry:
-    """Прогоны в оперативе (живые + недавние завершённые), капается по limit."""
+def jobs_path() -> Path:
+    """Файл истории — в StateDir, рядом с plugins.json (та же env-переменная)."""
+    state = os.environ.get(
+        "SRV_EXPLORE_PLUGIN_STATE", "/var/lib/srv-explore/plugins.json"
+    )
+    return Path(state).with_name("jobs.json")
 
-    def __init__(self, limit: int = 200):
+
+class JobRegistry:
+    """Прогоны: живые + недавние завершённые, капается по limit.
+
+    История переживает рестарт сервиса (файл в StateDir), кроме поля `result`:
+    в нём факты с прода (выдержки логов, данные БД), их на диск не кладём — после
+    рестарта job отвечает статусом и шагами, а результат живёт только в оперативе.
+    Сам прогон рестарт не переживает (песочница умирает с родителем), поэтому
+    running при загрузке становится error.
+    """
+
+    def __init__(self, limit: int = 200, path: Path | None = None):
         self._jobs: dict[str, dict] = {}
         self._order: list[str] = []
         self._done: dict[str, asyncio.Event] = {}
         self.limit = limit
+        self.path = path or jobs_path()
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            saved = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for job in saved:
+            if not isinstance(job, dict) or not job.get("id"):
+                continue
+            job.setdefault("result", None)
+            if job.get("status") == "running":
+                job.update(
+                    status="error",
+                    error="прерван рестартом сервиса",
+                    finished=job.get("finished") or _now(),
+                )
+            self._jobs[job["id"]] = job
+            self._order.append(job["id"])
+
+    def save(self) -> None:
+        """Скинуть историю на диск (без result). Диск недоступен (dev) — молча мимо:
+        персист — удобство, не условие работы."""
+        data = [
+            {k: v for k, v in self._jobs[i].items() if k != "result"}
+            for i in self._order
+        ]
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
 
     def _add(self, task: str, label: str, **fields) -> dict:
         job_id = "job_" + secrets.token_hex(6)
@@ -300,6 +356,7 @@ class JobRegistry:
             dropped = self._order.pop(0)
             self._jobs.pop(dropped, None)
             self._done.pop(dropped, None)
+        self.save()
         return job
 
     def record(self, task: str, label: str, **fields) -> dict:
@@ -325,6 +382,7 @@ class JobRegistry:
                 if job:
                     job.update(status="error", error=repr(e), finished=_now())
             finally:
+                self.save()
                 done.set()
 
         asyncio.ensure_future(runner())
@@ -407,6 +465,7 @@ def build_app(store: TokenStore | None = None):
             last = steps[-1]["cmd"] if steps else "готовлю прогон"
             sent += 1
             await ctx.report_progress(progress=sent, message=last[:200])
+            jobs.save()  # шаги на диск по ходу: рестарт посреди прогона их не съест
             left = deadline - asyncio.get_running_loop().time()
             if left <= 0 or await jobs.wait(job_id, min(PROGRESS_SEC, max(left, 0))):
                 break
@@ -541,6 +600,7 @@ def build_app(store: TokenStore | None = None):
         # чужой прогон неотличим от несуществующего; админ видит любой
         if job is None or (who.role != "admin" and job["label"] != who.label):
             return JSONResponse({"error": "unknown job_id"}, status_code=404)
+        jobs.save()  # браузерный путь без heartbeat: шаги на диск при поллинге
         return JSONResponse(job)
 
     # --- /admin: оболочка публична, данные — под ролью admin (см. GATE) ---

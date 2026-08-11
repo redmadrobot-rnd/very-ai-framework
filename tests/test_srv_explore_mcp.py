@@ -153,6 +153,32 @@ def test_job_wait_times_out_but_run_survives():
     asyncio.run(scenario())
 
 
+def test_history_survives_restart_without_results(tmp_path):
+    """Файл истории переживает «рестарт» (новый реестр): статусы и шаги на месте,
+    running честно становится error, а result — только в оперативе, не на диске."""
+    path = tmp_path / "jobs.json"
+    jobs = mcp_server.JobRegistry(path=path)
+    done = jobs.record(
+        "df -h",
+        label="alice",
+        status="done",
+        result="данные прода",
+        steps=[{"cmd": "df -h", "ok": True, "reason": ""}],
+    )
+    running = jobs._add("долгая задача", label="bob")
+    jobs.save()
+    assert "данные прода" not in path.read_text(encoding="utf-8")
+
+    reborn = mcp_server.JobRegistry(path=path)
+    survived = reborn.get(done["id"])
+    assert (survived["status"], survived["result"]) == ("done", None)
+    assert survived["steps"] == [{"cmd": "df -h", "ok": True, "reason": ""}]
+    interrupted = reborn.get(running["id"])
+    assert interrupted["status"] == "error"
+    assert "рестартом" in interrupted["error"]
+    assert interrupted["finished"] is not None
+
+
 def test_recorded_command_lands_in_history():
     jobs = mcp_server.JobRegistry()
     jobs.record("ls /etc", label="alice", status="done", result="passwd")
