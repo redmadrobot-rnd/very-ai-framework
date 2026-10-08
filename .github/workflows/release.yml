@@ -1,15 +1,18 @@
 name: Release — promote images & deploy prod
 
-# Триггер: тег v* — любой коммит main не раньше текущего прода (refs/deploy/prod).
-# Шаги: prepare (гейты + пин образов в digest по :<sha>) → tests → promote (digest → :vX,
-# иммутабельно) → advance-marker → deploy-prod. Откат — manual-deploy предыдущего :vX (build=off).
+# Триггер: тег v* на коммите main или ветки release/X.Y.x (хотфикс), не раньше того, что
+# СЕЙЧАС стоит на проде. Правда о проде — файл .deployed на хосте (пишет deploy.sh после
+# успешного выката), гейт читает его по SSH; правило — .github/scripts/release-gate.sh.
+# Шаги: prepare (гейт + пин образов в digest по :<sha>) → build-missing (образы коммитов
+# release/*, которых dev-build не собирал) + tests → promote (digest → :vX, иммутабельно)
+# → deploy-prod. Откат — manual-deploy предыдущего :vX (build=off).
 
 on:
   push:
     tags:
       - "v*"
 
-# Релизы строго по одному: параллельный ран прошёл бы гейт по старому маркеру
+# Релизы строго по одному: параллельный ран прошёл бы гейт по .deployed, который вот-вот сменится
 concurrency:
   group: release-prod
   cancel-in-progress: false
@@ -21,41 +24,48 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # environment: prod — ради SSH_* к хосту, где лежит .deployed. Если на prod включены
+    # required reviewers, апрув спросят и здесь, и на deploy-prod.
+    environment: prod
     permissions:
       contents: read
       packages: read
     outputs:
       services: ${{ steps.s.outputs.services }}
       digests: ${{ steps.pin.outputs.digests }}
+      missing: ${{ steps.pin.outputs.missing }}
+      missing_list: ${{ steps.pin.outputs.missing_list }}
+      deployed: ${{ steps.prod.outputs.deployed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Tag must be on main and not behind current prod
-        # 1) тег на first-parent-истории main (пин образов ищет sha merge-коммитов);
-        # 2) тег — потомок последней релизной точки (refs/deploy/prod): откат кода
-        #    против уже накаченных миграций запрещён. Сбой чтения маркера = fail closed.
+      - name: Read what prod runs now (.deployed)
+        # Нет файла при живом каталоге — первый релиз. Любая другая беда чтения — стоп:
+        # без правды о проде гейт не считается.
+        id: prod
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          PROJECT: ${{ github.event.repository.name }}
+          ENVIRONMENT: prod
         run: |
-          git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
-          # grep без -q: иначе SIGPIPE от rev-list под pipefail
-          git rev-list --first-parent refs/remotes/origin/main | grep -x "$GITHUB_SHA" >/dev/null || {
-            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на first-parent-истории main. Тег должен стоять на коммите main."
-            exit 1
-          }
-          # ls-remote --exit-code: rc=2 — маркера нет (первый релиз), прочие ошибки — стоп
-          if MARKER=$(git ls-remote --exit-code origin refs/deploy/prod); then
-            PROD_SHA=${MARKER%%$'\t'*}
-            git merge-base --is-ancestor "$PROD_SHA" "$GITHUB_SHA" || {
-              echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) старше текущего прода (${PROD_SHA}). Релиз двигает прод только вперёд; откат — manual-deploy предыдущего :vX (build=off)."
-              exit 1
-            }
-          elif [ $? -eq 2 ]; then
-            echo "::notice::refs/deploy/prod не найден — первый релиз, монотонность не проверяем"
-          else
-            echo "::error::не удалось прочитать refs/deploy/prod (сеть/права) — guard не скипаем, fail closed"
-            exit 1
-          fi
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
+          deployed=$(bash .github/scripts/read-deployed.sh)
+          echo "deployed=$deployed" >> "$GITHUB_OUTPUT"
+          echo "::notice::на проде: ${deployed:-<пусто>}"
+
+      - name: Gate — tag may go on top of current prod
+        id: gate
+        env:
+          DEPLOYED: ${{ steps.prod.outputs.deployed }}
+        run: bash .github/scripts/release-gate.sh check "$GITHUB_SHA" "$DEPLOYED"
 
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
@@ -68,29 +78,85 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: pin
-        # Каждый сервис → digest образа :<sha> последнего коммита main, менявшего его
-        # каталог. Не :latest — он мог протухнуть (dev-build отменён/упал) → падаем.
-        # --first-parent: образы тегируются sha merge-коммита, не коммитов PR-ветки.
+        # Каждый сервис → digest образа :<sha> последнего first-parent-коммита ИСТОРИИ ТЕГА,
+        # менявшего его каталог. Не :latest — он мог протухнуть (dev-build отменён/упал).
+        # Образа нет — смотрим линию тега:
+        #   main      → недобитый dev-build; собрать здесь = выкатить на прод образ, которого
+        #               dev не видел, — отказ (build once, deploy many);
+        #   release/* → норма: коммиты ветки dev-build не собирает → в `missing`, соберёт
+        #               build-missing из этого же чекаута (каталог на теге = каталог на svc_sha).
         env:
           SERVICES: ${{ steps.s.outputs.services }}
+          LINE: ${{ steps.gate.outputs.line }}
         run: |
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          map='{}'
+          map='{}'; missing='{}'
           for svc in $(printf '%s' "$SERVICES" | jq -r '.[]'); do
             svc_sha=$(git log --first-parent -1 --format=%H -- "$SERVICES_DIR/$svc/")
             if [ -z "$svc_sha" ]; then
-              echo "::error::не найден коммит main, менявший $SERVICES_DIR/$svc/ — сервис не под first-parent-историей?"
+              echo "::error::не найден коммит, менявший $SERVICES_DIR/$svc/ — сервис не под first-parent-историей?"
               exit 1
             fi
             ref="$PREFIX/$svc:$svc_sha"
-            if ! digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null); then
-              echo "::error::образ $ref не найден: dev-build коммита ${svc_sha:0:12} не завершился (отменён или упал). Перезапусти его run «Build changed & deploy dev» (Actions → Re-run jobs), затем re-run release."
+            if digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+              echo "pin $svc (${svc_sha:0:12}) -> $digest"
+              map=$(jq -c --arg s "$svc" --arg d "$digest" '. + {($s): $d}' <<<"$map")
+            elif [ "$LINE" = "main" ]; then
+              echo "::error::образ $ref не найден: dev-build коммита ${svc_sha:0:12} не завершился (отменён или упал). На прод едет только то, что было на dev. Перезапусти его run «Build changed & deploy dev» (Actions → Re-run jobs), затем re-run release."
               exit 1
+            else
+              echo "::notice::образа $ref нет — коммит ветки $LINE, $svc соберём в этом ране"
+              missing=$(jq -c --arg s "$svc" --arg d "$svc_sha" '. + {($s): $d}' <<<"$missing")
             fi
-            echo "pin $svc (${svc_sha:0:12}) -> $digest"
-            map=$(jq -c --arg s "$svc" --arg d "$digest" '. + {($s): $d}' <<<"$map")
           done
           echo "digests=$map" >> "$GITHUB_OUTPUT"
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+          # список имён отдельно: выражениям Actions нечем взять ключи объекта для matrix
+          echo "missing_list=$(jq -c 'keys' <<<"$missing")" >> "$GITHUB_OUTPUT"
+
+  # Сборка образов коммитов release/*. Тег :<svc_sha> — тот же, что дал бы dev-build, чтобы
+  # следующий патч с той же ветки нашёл образ готовым.
+  build-missing:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.missing_list != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.missing_list) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: img
+        env:
+          MISSING: ${{ needs.prepare.outputs.missing }}
+          SVC: ${{ matrix.service }}
+        run: |
+          echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r --arg s "$SVC" '.[$s]' <<<"$MISSING")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.SERVICES_DIR }}/${{ matrix.service }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ steps.img.outputs.sha }}
 
   # Полный прогон тестов на релизном коммите. Упали → promote/deploy-prod не запустятся.
   tests:
@@ -103,8 +169,13 @@ jobs:
   # Один job с циклом, не matrix: операция секундная, 11 раннеров — оверхед.
   # imagetools create идемпотентен, безопасно ре-ранить job целиком.
   promote:
-    needs: [prepare, tests]
-    if: ${{ needs.prepare.outputs.services != '[]' }}
+    needs: [prepare, tests, build-missing]
+    # always(): build-missing скипнут, когда собирать нечего, — это не провал.
+    if: >-
+      ${{ always() && needs.prepare.outputs.services != '[]'
+          && needs.prepare.result == 'success'
+          && needs.tests.result == 'success'
+          && (needs.build-missing.result == 'success' || needs.build-missing.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -121,12 +192,21 @@ jobs:
         env:
           REF: ${{ github.ref_name }}
           DIGESTS: ${{ needs.prepare.outputs.digests }}
+          MISSING: ${{ needs.prepare.outputs.missing }}
         # Не останавливаемся на первом упавшем сервисе (аналог fail-fast: false):
         # промоутим все, кого можем, и падаем в конце со списком проблемных.
         # :vX иммутабелен: другой digest — fail, тот же — skip (идемпотентный ре-ран).
         run: |
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           failed=""
+          # собранные в этом ране — пинуем в digest сейчас, тем же способом, что prepare
+          for svc in $(jq -r 'keys[]' <<<"$MISSING"); do
+            svc_sha=$(jq -r --arg s "$svc" '.[$s]' <<<"$MISSING")
+            digest=$(docker buildx imagetools inspect "$PREFIX/$svc:$svc_sha" --format '{{.Manifest.Digest}}') \
+              || { echo "::error::образ $PREFIX/$svc:$svc_sha не найден после build-missing"; exit 1; }
+            echo "pin $svc (${svc_sha:0:12}, собран здесь) -> $digest"
+            DIGESTS=$(jq -c --arg s "$svc" --arg d "$digest" '. + {($s): $d}' <<<"$DIGESTS")
+          done
           for svc in $(jq -r 'keys[]' <<<"$DIGESTS"); do
             digest=$(jq -r --arg s "$svc" '.[$s]' <<<"$DIGESTS")
             if existing=$(docker buildx imagetools inspect "$PREFIX/$svc:$REF" --format '{{.Manifest.Digest}}' 2>/dev/null); then
@@ -144,20 +224,16 @@ jobs:
           done
           [ -z "$failed" ] || { echo "::error::promote упал для:$failed"; exit 1; }
 
-  advance-marker:
-    needs: promote
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Advance prod release marker
-        run: git push --quiet --force origin "${GITHUB_SHA}:refs/deploy/prod"
-
+  # Что стоит на проде после выката, записывает сам deploy.sh (.deployed).
   deploy-prod:
-    needs: [prepare, promote, advance-marker]
-    if: ${{ needs.prepare.outputs.services != '[]' }}
+    needs: [prepare, promote]
+    # Без функции статуса if неявно = success() по ВСЕМ предкам: скипнутый build-missing
+    # утянул бы деплой в skip при зелёном ране. !cancelled(), не always(): отмена релиза,
+    # пока деплой ждёт concurrency, не должна его запускать.
+    if: >-
+      ${{ !cancelled() && needs.prepare.outputs.services != '[]'
+          && needs.prepare.result == 'success'
+          && needs.promote.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
@@ -181,6 +257,23 @@ jobs:
           [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
 
       - uses: actions/checkout@v4
+
+      - name: Prod still runs what the gate saw
+        # Между гейтом и этим шагом — тесты и сборка, минуты. Прод сменился (manual-deploy,
+        # откат) — гейт считался от вчерашней правды: стоп, re-run релиза целиком.
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          PROJECT: ${{ github.event.repository.name }}
+          ENVIRONMENT: prod
+          EXPECTED: ${{ needs.prepare.outputs.deployed }}
+        run: |
+          now=$(bash .github/scripts/read-deployed.sh)
+          [ "$now" = "$EXPECTED" ] || {
+            echo "::error::прод сменился после гейта: было '${EXPECTED:-<пусто>}', стало '${now:-<пусто>}'. Перезапусти релиз целиком (Re-run all jobs)."
+            exit 1
+          }
 
       - name: Build .env (prod config)
         env:
@@ -208,11 +301,13 @@ jobs:
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ github.ref_name }}
+          # sha рядом с тегом в .deployed: сдвинутый тег подменил бы гейту точку отсчёта молча
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG
+          envs: GHCR_USER,GHCR_TOKEN,COMPOSE_PROFILES,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SHA
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/prod/.github/scripts/deploy.sh"
             prod "$DEPLOY_REPO" "$DEPLOY_TAG"

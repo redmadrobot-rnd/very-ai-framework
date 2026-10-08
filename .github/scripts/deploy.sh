@@ -9,6 +9,9 @@
 #   валидация env и имени проекта; каталог /srv/deploy/<project>/<env> (неймспейс по
 #   проекту — на одном хосте уживается несколько); COMPOSE_PROJECT_NAME=<project>-<env>
 #   (изоляция стеков); docker login ghcr.io → docker compose pull → up -d --wait.
+#   После выката ВСЕГО стека на релизную координату (vX… или manual-<hex>) пишет в
+#   .deployed "<tag> <DEPLOY_SHA>" — правду о том, что стоит, для гейта релиза и среза
+#   хотфикса. Прод целиком — только на такую координату и с полным DEPLOY_SHA.
 # Выход:   развёрнутый стек; docker compose ps в лог; ненулевой код при ошибке.
 set -euo pipefail
 
@@ -19,6 +22,10 @@ SERVICES="${4:-}"
 
 [ "$SERVICES" = "all" ] && SERVICES=""
 SERVICES="${SERVICES//,/ }"
+# Только выкат всего стека одним тегом описывает окружение этим тегом; точечный оставляет
+# стек смешанным и .deployed не трогает.
+WHOLE_STACK=""; [ -z "$SERVICES" ] && WHOLE_STACK=1
+RELEASE_TAG_RE='^(v[0-9A-Za-z._-]+|manual-[0-9a-f]{7,40})$'
 
 if ! [[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9_-]*$ ]]; then
   echo "invalid environment: '$ENVIRONMENT'" >&2
@@ -38,6 +45,19 @@ DIR="/srv/deploy/${PROJECT}/${ENVIRONMENT}"
 CPN="${PROJECT,,}-${ENVIRONMENT}"
 CPN="${CPN//[^a-z0-9_-]/-}"
 while [[ "$CPN" == [-_]* ]]; do CPN="${CPN#?}"; done  # docker требует старт с [a-z0-9]
+
+# .deployed прода — точка отсчёта гейта релиза: `latest` коммит не называет, голый тег
+# можно сдвинуть. Отказ ДО любого касания стека.
+if [ "$ENVIRONMENT" = prod ] && [ -n "$WHOLE_STACK" ]; then
+  if ! [[ "$TAG" =~ $RELEASE_TAG_RE ]]; then
+    echo "::error::полный выкат прода на '$TAG' не делаем: ждём vX.Y.Z или manual-<sha>. Стек не тронут" >&2
+    exit 1
+  fi
+  if ! [[ "${DEPLOY_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "::error::полный выкат прода без полного DEPLOY_SHA (40 hex) не делаем. Руками: DEPLOY_SHA=\$(git rev-parse '$TAG^{commit}') deploy.sh …. Стек не тронут" >&2
+    exit 1
+  fi
+fi
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
@@ -64,5 +84,13 @@ else
   docker compose --compatibility pull
   docker compose --compatibility up -d --wait --wait-timeout 300 --force-recreate --remove-orphans
   echo "$STACK_SHA" > .stack.sha
+fi
+# Пишется только после успешного up (set -e): упавший выкат оставляет прошлое значение.
+if [ -z "$WHOLE_STACK" ]; then
+  echo ".deployed не трогаем: выкат не всего стека ($SERVICES)"
+elif [[ "$TAG" =~ $RELEASE_TAG_RE ]]; then
+  echo "${TAG}${DEPLOY_SHA:+ $DEPLOY_SHA}" > .deployed
+else
+  echo ".deployed не трогаем: '$TAG' — не релизная координата"
 fi
 docker compose ps

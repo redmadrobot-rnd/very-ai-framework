@@ -24,7 +24,8 @@ PR в main                     PR CI: checks (ruff + security) ‖ tests (зат
 merge в main                  Build changed & deploy dev: собрать ТОЛЬКО изменённые образы → деплой на dev
         │                     (тесты/чеки на мерж не гоняются; полный прогон — вручную: Full tests)
         ▼
-release tag v*                полный прогон тестов → промоут готовых образов (каждый по :<sha> последнего коммита main, менявшего сервис → :vX по digest) → deploy prod
+release tag v*                гейт по .deployed прода → полный прогон тестов → промоут готовых образов (каждый по :<sha> последнего коммита, менявшего сервис → :vX по digest) → deploy prod
+(main или release/X.Y.x)      хотфикс: тег на release/X.Y.x — недостающие образы собираются в ране
                               откат: деплой предыдущего :vX (manual-deploy, build=off)
 ```
 
@@ -40,14 +41,18 @@ release tag v*                полный прогон тестов → про�
 | `.github/workflows/codex-command.yml` | Codex-команды в PR: `@codex review` / `@codex …` (вопрос) |
 | `.github/workflows/claude.yml` | `@claude` — правки по запросу |
 | `.github/workflows/deploy-dev.yml` | push в `main` → build изменённых → deploy dev |
-| `.github/workflows/release.yml` | tag `v*` → тесты → промоут образов (каждый пинится по `:<sha>` последнего коммита main, менявшего его каталог; нет образа → релиз падает, не откатываясь на `:latest`; digest→`:vX`, без сборки) → deploy prod; откат — деплой предыдущего `:vX` |
+| `.github/workflows/release.yml` | tag `v*` (на `main` или `release/X.Y.x`) → гейт по `.deployed` прода → тесты → промоут образов (каждый пинится по `:<sha>` последнего коммита, менявшего его каталог; нет образа: на `main` — релиз падает, на `release/*` — собирается в ране; digest→`:vX`) → deploy prod; см. «Релиз, хотфикс и откат» |
 | `.github/workflows/manual-deploy.yml` | ручной build и/или deploy матрицей (`workflow_dispatch`); deploy-only по тегу (`build=off`) |
 | `.github/scripts/codex_review.py` | Codex-ревьюер (JSON-находки → inline-review) |
 | `.github/scripts/codex_answer.py` | Codex-ответчик на `@codex …` (PR-тред / inline-тред) |
 | `.github/scripts/services.sh` | динамическое обнаружение сервисов (`services/*`, `list` / `changed` / `select`) |
 | `.github/scripts/discover-test-dirs.sh` | обнаружение тест-каталогов по `pyproject` |
 | `.github/scripts/changed-test-dirs.sh` | вычисление затронутых тест-каталогов для PR (`changed_only`) |
-| `.github/scripts/deploy.sh` | деплой по SSH (login GHCR + docker compose) |
+| `.github/scripts/deploy.sh` | деплой по SSH (login GHCR + docker compose); после выката всего стека пишет `.deployed` |
+| `.github/scripts/release-gate.sh` | гейт релиза: можно ли тег поверх того, что стоит на проде |
+| `.github/scripts/read-deployed.sh` | чтение `.deployed` с хоста по SSH (fail closed) |
+| `.github/scripts/prod-sha.sh` | для человека: от какого коммита резать `release/X.Y.x` |
+| `.github/scripts/tests/` | тесты CI-скриптов (`*.test.sh`), гоняются в `checks` |
 | `.pre-commit-config.yaml` | локальный гейт: ruff (--fix) + ruff-format, detect-secrets, KB-lint |
 | `services/<имя>/` | твои сервисы (каждый — со своим `Dockerfile`); в шаблоне их нет |
 | `docker-compose.example.yml` | образец compose — скопируй в `docker-compose.yml` под свои сервисы |
@@ -96,6 +101,61 @@ On-demand `@codex review` в комментарии работает всегд�
 намеренно **не environment**: environment не резолвится в job-level `if:`, и флаг там был
 бы не виден. Прочие слои защиты остаются: джоб бежит только для PR из самого репозитория
 (`head.repo == github.repository`), форк-PR его не запускают.
+
+## Релиз, хотфикс и откат
+
+Модель: `main` = dev, тег `v*` = prod, на прод едут те же digest, что крутились на dev.
+
+**Правда о проде — `.deployed` на хосте** (`/srv/deploy/<project>/prod/.deployed`,
+`"<tag> <sha>"`). Его пишет `deploy.sh` только после успешного выката **всего стека** на
+релизную координату (`vX…` или `manual-<hex>`); точечный выкат его не трогает. `release.yml`
+читает файл по SSH (`prepare` поэтому идёт под Environment `prod`) и перепроверяет перед
+`deploy-prod`. Нет файла при живом каталоге — первый релиз; любая другая беда чтения — стоп.
+На новом хосте до первого релиза каталог создаётся руками: `mkdir -p /srv/deploy/<project>/prod`.
+
+**Гейт** (`release-gate.sh`), `T` — тег, `D` — коммит из `.deployed`:
+- `T` на first-parent-истории `main` или ветки `release/*`;
+- `D` предок `T` — обычный релиз или патч поверх патча;
+- иначе только для `T` на `main`: `T` содержит `merge-base(main, D)` — релиз с `main` после
+  хотфиксов. Что хотфиксы дошли до `main`, гейт **не проверяет** — это на авторе хотфикса.
+- Два хотфикса от одной точки на разных ветках не пройдут: второй ставится поверх первого.
+
+### Хотфикс прода
+
+Ветка `release/X.Y.x` режется **лениво**, при первом хотфиксе, от тега прода. Патчи ложатся
+на неё по очереди (`vX.Y.1`, `vX.Y.2`, …). Основной путь — **trunk-first**: фикс обычным PR в
+`main` (ревью, dev-смоук), затем cherry-pick на ветку.
+
+```bash
+# 1. Фикс — обычный PR в main. Мерж → dev. Проверить на dev.
+# 2. Что стоит на проде (доступ к хосту — свой, вне git)
+bash .github/scripts/prod-sha.sh <user@host>          # → <sha> vX.Y.Z
+# 3. Ветка релиза от этого тега (если уже есть — просто switch)
+git switch -c release/X.Y.x vX.Y.Z
+# 4. Перенести фикс; -x оставляет ссылку на исходный коммит
+git cherry-pick -x <sha коммита в main> && git push -u origin release/X.Y.x
+# 5. Тег — следующий патч-номер. Это боевой выкат.
+git tag vX.Y.1 && git push origin vX.Y.1
+```
+
+На теге с `release/*` образ починенного сервиса в GHCR отсутствует (dev-build ветку не
+собирает) — `build-missing` собирает его в том же ране и тегирует `:<sha>`; остальные сервисы
+едут своими текущими digest.
+
+Запасной путь — **branch-first** (main ушёл далеко или прод горит): фикс прямо на
+`release/X.Y.x`, смоук — `manual-deploy` с ветки (`build=true`, `environment=dev`), тег, затем
+PR `release/X.Y.x → main`. Забытый форвард-порт всплывёт регрессом на следующем релизе с `main`.
+
+Перед срезом сверься, что `.deployed` == последний тег `v*`; расхождение = прод грязный (упавший
+выкат) — сначала re-run релиза или откат. Ветка живёт до следующего минорного релиза, целиком в
+`main` её не мержат. Миграции БД в хотфиксе по умолчанию не везут: схема едет релизом с `main`.
+
+### Откат
+
+`manual-deploy`: `build=false`, `deploy=true`, `environment=prod`, `tag=<предыдущий vX>`,
+`service=all`. Выкат всего стека перепишет `.deployed`, и гейт дальше считает от отката.
+Полный выкат прода принимает только `vX…`/`manual-<hex>` с известным коммитом. После отката —
+только вперёд через `main`, хотфиксы влить до следующего тега.
 
 ## Зачем Codex-ревью и `@codex …`
 

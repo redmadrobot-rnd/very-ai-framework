@@ -1,6 +1,6 @@
 name: Checks (reusable)
 
-# lint + security. Общий блок для PR и main, чтобы не дублировать в двух файлах.
+# lint + тесты CI-скриптов + security. Общий блок для PR и main, чтобы не дублировать в двух файлах.
 on:
   workflow_call:
 
@@ -26,6 +26,23 @@ jobs:
           else
             echo "::notice::нет docs/gitmark — KB lint пропущен"
           fi
+
+  scripts:
+    # Тесты CI-скриптов (.github/scripts/tests/*.test.sh): временный git-репо и шимы вместо
+    # ssh/docker — ни сети, ни реестра, секунды. Гоняется весь каталог: новый тест подхватится сам.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: CI script tests
+        run: |
+          shopt -s nullglob
+          found=0
+          for t in .github/scripts/tests/*.test.sh; do
+            echo "::group::$t"; bash "$t"; echo "::endgroup::"
+            found=1
+          done
+          [ "$found" = 1 ] || { echo "::error::в .github/scripts/tests/ нет ни одного теста"; exit 1; }
 
   security:
     if: "!contains(github.event.head_commit.message, '[skip security]')"

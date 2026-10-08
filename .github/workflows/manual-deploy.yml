@@ -135,6 +135,41 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # резолв тега/sha для .deployed ниже
+
+      - name: Resolve commit behind the deployed tag
+        # deploy.sh пишет в .deployed "<tag> <sha>": гейт релиза опирается на sha, тег лишь
+        # сверяет. build=on → sha этого рана; build=off → коммит тега (vX или manual-<hex>).
+        id: sha
+        env:
+          DO_BUILD: ${{ inputs.build }}
+          TAG: ${{ needs.discover.outputs.tag }}
+          TARGET_ENV: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+        run: |
+          if [ "$DO_BUILD" = "true" ]; then
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --quiet --tags origin || true
+          # manual-<hex> — только hex: `manual-main` резолвился бы в ветку
+          if [[ "$TAG" =~ ^v ]]; then
+            sha=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+          elif [[ "$TAG" =~ ^manual-([0-9a-f]{7,40})$ ]]; then
+            sha=$(git rev-parse -q --verify "${BASH_REMATCH[1]}^{commit}" || true)
+          else
+            sha=""
+          fi
+          if [ -z "$sha" ]; then
+            # прод целиком — только на релизную координату с известным коммитом (deploy.sh
+            # откажет и сам, здесь — понятнее и до копирования на хост)
+            if [ "$TARGET_ENV" = prod ] && [ "$SERVICE" = all ]; then
+              echo "::error::коммит за тегом '$TAG' не найден в репо — полный выкат прода без него не делаем (нужен vX.Y.Z из репо или manual-<sha>)"; exit 1
+            fi
+            echo "::warning::коммит за тегом '$TAG' не найден — .deployed получит только тег, без sha"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Build .env (${{ inputs.environment }} config)
         env:
           APP_DOTENV: ${{ vars.APP_DOTENV }}
@@ -159,13 +194,16 @@ jobs:
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
-          DEPLOY_SERVICES: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
+          DEPLOY_SHA: ${{ steps.sha.outputs.sha }}
+          # service=all → "all": выкат всего стека (он один пишет .deployed — откат прода
+          # должен сдвинуть точку отсчёта гейта); явный список — точечно
+          DEPLOY_SERVICES: ${{ inputs.service == 'all' && 'all' || join(fromJson(needs.discover.outputs.services), ' ') }}
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SERVICES,COMPOSE_PROFILES
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_ENV,DEPLOY_REPO,DEPLOY_PROJECT,DEPLOY_TAG,DEPLOY_SHA,DEPLOY_SERVICES,COMPOSE_PROFILES
           script: >
             bash "/srv/deploy/$DEPLOY_PROJECT/$DEPLOY_ENV/.github/scripts/deploy.sh"
             "$DEPLOY_ENV" "$DEPLOY_REPO" "$DEPLOY_TAG" "$DEPLOY_SERVICES"
