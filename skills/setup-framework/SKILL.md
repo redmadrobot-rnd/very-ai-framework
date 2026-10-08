@@ -222,7 +222,9 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
 - Install Docker; make sure `docker compose` is available.
 - The public deploy key in `authorized_keys`.
 - Directories are created automatically (`/srv/deploy/<project>/<env>` in `deploy.sh`,
-  namespaced by repo name so several projects can share one host).
+  namespaced by repo name so several projects can share one host). Exception — the prod host
+  before its first release: the release gate reads `/srv/deploy/<project>/prod/.deployed` and
+  fails closed on a missing directory, so create it once: `mkdir -p /srv/deploy/<project>/prod`.
 - For private GHCR images, deploy logs in with `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`).
 
 ## Step 9. Verify the install
