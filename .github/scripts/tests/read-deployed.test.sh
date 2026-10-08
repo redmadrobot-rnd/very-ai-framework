@@ -56,6 +56,15 @@ else
 fi
 chmod 644 "$T/srv/proj/prod/.deployed"
 
+rm -f "$T/srv/proj/prod/.deployed"; chmod 644 "$T/srv/proj/prod"
+# каталог виден, но не зайти: отсутствие файла не доказано
+if [ -x "$T/srv/proj/prod" ]; then
+  ok "каталог без x — пропуск: chmod здесь заходу не мешает"
+else
+  run; chk "каталог без x, файла не видно — отказ, не пусто" "$rc" 1
+fi
+chmod 755 "$T/srv/proj/prod"
+
 FX_DOWN=1 run; chk "хост недоступен — отказ" "$rc" 1; has "  текст" "$err" "fail closed"
 
 echo

@@ -88,6 +88,18 @@ chk "  .deployed = manual + sha" "$(deployed)" "manual-abc1234 $SHA"
 out=$(run j10 -- prod fake/repo latest a); chk "точечный latest на прод — не ограничен" "$?" 0
 chk "  .deployed не тронут" "$(deployed)" "manual-abc1234 $SHA"
 
+echo "точечный запрос при сменившемся compose — это выкат всего стека"
+printf 'services:
+  a: {image: "x/a:latest"}
+  b: {image: "x/b:latest"}
+' > "$T/dir/docker-compose.yml"
+out=$(run j11 -- prod fake/repo latest a); chk "prod: latest a при новом compose — отказ" "$?" 1
+has "  назван" "$out" "vX.Y.Z или manual-<sha>"; chk "  стек не тронут" "$(mutations j11)" 0
+out=$(run j12 DEPLOY_SHA=$SHA -- prod fake/repo v6 a); chk "prod: v6 a со sha при новом compose — выкат" "$?" 0
+chk "  .deployed = v6 + sha" "$(deployed)" "v6 $SHA"
+out=$(run j13 DEPLOY_SHA=$SHA -- prod fake/repo v7 a); chk "следом точечный при том же compose — прошёл" "$?" 0
+chk "  .deployed не тронут" "$(deployed)" "v6 $SHA"
+
 echo
 echo "deploy-deployed-marker: $pass ok, $fail fail"
 [ "$fail" = 0 ]

@@ -17,9 +17,9 @@ SSH="${SSH:-ssh}"
 : "${SSH_HOST:?}" "${SSH_USER:?}" "${SSH_KEY:?}" "${PROJECT:?}" "${ENVIRONMENT:?}"
 
 f="/srv/deploy/$PROJECT/$ENVIRONMENT/.deployed"
-# На хосте: файл → cat; нет файла при живом каталоге → маркер; иначе — рассказать, что увидели, rc 3.
+# На хосте: файл → cat; нет файла в доступном каталоге → маркер; иначе — рассказать, что увидели, rc 3.
 remote="if [ -f '$f' ]; then cat '$f';
-        elif [ -d '${f%/*}' ] && [ ! -e '$f' ]; then echo __absent__;
+        elif [ -d '${f%/*}' ] && [ -x '${f%/*}' ] && [ ! -e '$f' ]; then echo __absent__;
         else echo \"__unreadable__ \$(ls -ld '$f' '${f%/*}' 2>&1 | tr '\n' ' ')\" >&2; exit 3; fi"
 
 key=$(mktemp); trap 'rm -f "$key"' EXIT

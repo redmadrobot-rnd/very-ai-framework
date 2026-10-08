@@ -4,7 +4,7 @@
 #             получает гейт релиза: прочитать .deployed на проде и перевести его в коммит.
 # Вход:    $1 = user@host прода (доступы — вне git); $2 = имя проекта на хосте
 #          (каталог /srv/deploy/<project>/prod), по умолчанию — имя репо из URL origin.
-# Выход:   "<sha> <tag>" в stdout. Дальше: git switch -c release/X.Y.x <tag>
+# Выход:   "<sha> <tag>" в stdout. Дальше: git switch -c release/X.Y.x <sha>
 set -euo pipefail
 
 [ $# -ge 1 ] || { echo "usage: prod-sha.sh <user@host> [project]" >&2; exit 1; }

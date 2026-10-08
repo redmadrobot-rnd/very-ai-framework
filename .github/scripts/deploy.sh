@@ -22,9 +22,6 @@ SERVICES="${4:-}"
 
 [ "$SERVICES" = "all" ] && SERVICES=""
 SERVICES="${SERVICES//,/ }"
-# Только выкат всего стека одним тегом описывает окружение этим тегом; точечный оставляет
-# стек смешанным и .deployed не трогает.
-WHOLE_STACK=""; [ -z "$SERVICES" ] && WHOLE_STACK=1
 RELEASE_TAG_RE='^(v[0-9A-Za-z._-]+|manual-[0-9a-f]{7,40})$'
 
 if ! [[ "$ENVIRONMENT" =~ ^[a-z][a-z0-9_-]*$ ]]; then
@@ -46,9 +43,21 @@ CPN="${PROJECT,,}-${ENVIRONMENT}"
 CPN="${CPN//[^a-z0-9_-]/-}"
 while [[ "$CPN" == [-_]* ]]; do CPN="${CPN#?}"; done  # docker требует старт с [a-z0-9]
 
+mkdir -p "$DIR"
+cd "$DIR"
+
+# хэш docker-compose.yml: сменился (или сервисы не заданы) → пересоздаём весь стек,
+# иначе только затронутые. Только выкат всего стека описывает окружение одним тегом —
+# точечный оставляет стек смешанным и .deployed не трогает.
+STACK_SHA="$(sha256sum docker-compose.yml | cut -c1-16)"
+FULL=1
+if [ -n "$SERVICES" ] && [ "$STACK_SHA" = "$(cat .stack.sha 2>/dev/null || true)" ]; then
+  FULL=""
+fi
+
 # .deployed прода — точка отсчёта гейта релиза: `latest` коммит не называет, голый тег
 # можно сдвинуть. Отказ ДО любого касания стека.
-if [ "$ENVIRONMENT" = prod ] && [ -n "$WHOLE_STACK" ]; then
+if [ "$ENVIRONMENT" = prod ] && [ -n "$FULL" ]; then
   if ! [[ "$TAG" =~ $RELEASE_TAG_RE ]]; then
     echo "::error::полный выкат прода на '$TAG' не делаем: ждём vX.Y.Z или manual-<sha>. Стек не тронут" >&2
     exit 1
@@ -61,8 +70,6 @@ fi
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-mkdir -p "$DIR"
-cd "$DIR"
 export GITHUB_REPOSITORY="$REPO" TAG="$TAG"
 export IMAGE_PREFIX="ghcr.io/${REPO,,}"
 export COMPOSE_PROJECT_NAME="$CPN"
@@ -70,11 +77,8 @@ export COMPOSE_PROJECT_NAME="$CPN"
 # Environment Variable COMPOSE_PROFILES через ssh-action. Пусто = все дефолтные сервисы.
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 
-# хэш docker-compose.yml: сменился (или сервисы не заданы) → пересоздаём весь стек,
-# иначе только затронутые.
-STACK_SHA="$(sha256sum docker-compose.yml | cut -c1-16)"
 echo "deploy [$PROJECT/$ENVIRONMENT] project=$CPN tag=$TAG services='${SERVICES:-all}'"
-if [ -n "$SERVICES" ] && [ "$STACK_SHA" = "$(cat .stack.sha 2>/dev/null || true)" ]; then
+if [ -z "$FULL" ]; then
   # shellcheck disable=SC2086
   docker compose --compatibility pull $SERVICES
   # shellcheck disable=SC2086
@@ -86,7 +90,7 @@ else
   echo "$STACK_SHA" > .stack.sha
 fi
 # Пишется только после успешного up (set -e): упавший выкат оставляет прошлое значение.
-if [ -z "$WHOLE_STACK" ]; then
+if [ -z "$FULL" ]; then
   echo ".deployed не трогаем: выкат не всего стека ($SERVICES)"
 elif [[ "$TAG" =~ $RELEASE_TAG_RE ]]; then
   echo "${TAG}${DEPLOY_SHA:+ $DEPLOY_SHA}" > .deployed
