@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       base_sha:
-        description: 'точка отсчёта changed_only; пусто = base PR из события (релиз передаёт коммит прода)'
+        description: 'коммит, с деревом которого сравнить для changed_only (релиз — коммит прода); пусто = base PR из события, от общего предка'
         type: string
         default: ''
       python-version:
@@ -42,11 +42,12 @@ jobs:
           # точка отсчёта зафиксирована событием (base PR) или релизом (коммит прода): не
           # зависит от того, сдвинулся ли origin/main, пока джоб бежал
           BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+          DIFF_MODE: ${{ inputs.base_sha != '' && 'tree' || 'merge-base' }}
         run: |
           all=$(bash .github/scripts/discover-test-dirs.sh)
           dirs="$all"
           if [ "$CHANGED_ONLY" = "true" ] && [ "$all" != "[]" ]; then
-            dirs=$(bash .github/scripts/changed-test-dirs.sh "$all" "$DEFAULT_BRANCH" "$BASE_SHA")
+            dirs=$(bash .github/scripts/changed-test-dirs.sh "$all" "$DEFAULT_BRANCH" "$BASE_SHA" "$DIFF_MODE")
           fi
           echo "all_test_dirs=$all" >> "$GITHUB_OUTPUT"
           echo "test_dirs=$dirs"    >> "$GITHUB_OUTPUT"
