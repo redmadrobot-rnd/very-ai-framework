@@ -8,9 +8,13 @@ on:
         type: string
         default: ''
       changed_only:
-        description: 'true = только тест-каталоги, затронутые изменениями ветки'
+        description: 'true = только тест-каталоги, затронутые изменениями относительно base_sha'
         type: boolean
         default: false
+      base_sha:
+        description: 'точка отсчёта changed_only; пусто = base PR из события (релиз передаёт коммит прода)'
+        type: string
+        default: ''
       python-version:
         type: string
         default: '3.12'
@@ -35,11 +39,14 @@ jobs:
         env:
           CHANGED_ONLY: ${{ inputs.changed_only }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # точка отсчёта зафиксирована событием (base PR) или релизом (коммит прода): не
+          # зависит от того, сдвинулся ли origin/main, пока джоб бежал
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
         run: |
           all=$(bash .github/scripts/discover-test-dirs.sh)
           dirs="$all"
           if [ "$CHANGED_ONLY" = "true" ] && [ "$all" != "[]" ]; then
-            dirs=$(bash .github/scripts/changed-test-dirs.sh "$all" "$DEFAULT_BRANCH")
+            dirs=$(bash .github/scripts/changed-test-dirs.sh "$all" "$DEFAULT_BRANCH" "$BASE_SHA")
           fi
           echo "all_test_dirs=$all" >> "$GITHUB_OUTPUT"
           echo "test_dirs=$dirs"    >> "$GITHUB_OUTPUT"

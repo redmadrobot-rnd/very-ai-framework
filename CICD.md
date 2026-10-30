@@ -24,7 +24,7 @@ PR в main                     PR CI: checks (ruff + security) ‖ tests (зат
 merge в main                  Build changed & deploy dev: собрать ТОЛЬКО изменённые образы → деплой на dev
         │                     (тесты/чеки на мерж не гоняются; полный прогон — вручную: Full tests)
         ▼
-release tag v*                гейт по .deployed прода → полный прогон тестов → промоут готовых образов (каждый по :<sha> последнего коммита, менявшего сервис → :vX по digest) → deploy prod
+release tag v*                гейт по .deployed прода → тесты сервисов, изменённых относительно прода → промоут готовых образов (каждый по :<sha> последнего коммита, менявшего сервис → :vX по digest) → deploy prod
 (main или release/X.Y.x)      хотфикс: тег на release/X.Y.x — недостающие образы собираются в ране
                               откат: деплой предыдущего :vX (manual-deploy, build=off)
 ```

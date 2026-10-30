@@ -36,6 +36,7 @@ jobs:
       missing: ${{ steps.pin.outputs.missing }}
       missing_list: ${{ steps.pin.outputs.missing_list }}
       deployed: ${{ steps.prod.outputs.deployed }}
+      deployed_sha: ${{ steps.base.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,6 +67,15 @@ jobs:
         env:
           DEPLOYED: ${{ steps.prod.outputs.deployed }}
         run: bash .github/scripts/release-gate.sh check "$GITHUB_SHA" "$DEPLOYED"
+
+      - name: Prod commit — release tests compare against it
+        id: base
+        env:
+          DEPLOYED: ${{ steps.prod.outputs.deployed }}
+        run: |
+          sha=""
+          [ -z "$DEPLOYED" ] || sha=$(bash .github/scripts/release-gate.sh resolve "$DEPLOYED")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
@@ -158,12 +168,17 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           tags: ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ steps.img.outputs.sha }}
 
-  # Полный прогон тестов на релизном коммите. Упали → promote/deploy-prod не запустятся.
+  # Тесты сервисов, изменённых относительно прода (все маркеры, включая heavy). Остальные
+  # едут теми же образами, что уже прошли свой релиз, — гонять их тесты снова значит платить
+  # за известный ответ. Затронут общий код вне services/ или прод пуст (первый релиз) —
+  # гоняем всё. Полный прогон — manual-tests.yml. Упали → promote/deploy-prod не запустятся.
   tests:
     needs: prepare
     uses: ./.github/workflows/_tests.yml
     with:
       markers: ''
+      changed_only: ${{ needs.prepare.outputs.deployed_sha != '' }}
+      base_sha: ${{ needs.prepare.outputs.deployed_sha }}
 
   # Промоут: для каждого сервиса зафиксированный digest -> :<vX>. Без сборки.
   # Один job с циклом, не matrix: операция секундная, 11 раннеров — оверхед.
