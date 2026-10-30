@@ -22,7 +22,9 @@
 #     - под services/<имя>/  → тест-каталоги этого сервиса (d == services/<имя>
 #                              ИЛИ d начинается с services/<имя>/);
 #                              сервис без тест-каталога → тестировать нечего, пропуск;
-#     - вне services/* (общий/корневой код)               → весь вход (fail closed).
+#     - вне services/* (общий/корневой код)               → весь вход (fail closed);
+#   плюс тест-каталоги соседей, чьи тесты читают исходники изменённого сервиса по пути
+#   (`/ "<имя>"` в *.py) — контрактные проверки между сервисами.
 # Выход:   JSON затронутых тест-каталогов; [] если ничего (tests-джоб скипается);
 #          весь вход, если base не вычислить ЛИБО затронут корневой/общий код.
 set -euo pipefail
@@ -71,8 +73,13 @@ json_array() {
 base=""
 if [ -n "$base_sha" ]; then
   # тянем, только если коммита нет: --depth на полном клоне укоротил бы историю
-  git cat-file -e "$base_sha^{commit}" >/dev/null 2>&1     || git fetch --no-tags --depth=100 origin "$base_sha" >/dev/null 2>&1 || true
+  if ! git cat-file -e "$base_sha^{commit}" >/dev/null 2>&1; then
+    git fetch --no-tags --depth=100 origin "$base_sha" >/dev/null 2>&1 || true
+  fi
   git cat-file -e "$base_sha^{commit}" >/dev/null 2>&1 && base="$base_sha"
+  # коммит прода не найден — сравнивать не с чем; откат на merge-base с main дал бы у тега
+  # на main пустой дифф и релиз без тестов
+  if [ -z "$base" ] && [ "$mode" = tree ]; then printf '%s' "$all_json"; exit 0; fi
 fi
 if [ -z "$base" ]; then
   git fetch --no-tags --depth=100 origin "$default" >/dev/null 2>&1 || true
@@ -82,15 +89,17 @@ if [ -z "$base" ]; then printf '%s' "$all_json"; exit 0; fi
 
 range="$base...HEAD"
 [ "$mode" = tree ] && range="$base HEAD"
-# дифф не посчитать (обрезанная история и т.п.) → гоним всё, а не пустую матрицу
+# дифф не посчитать (обрезанная история и т.п.) → гоним всё, а не пустую матрицу;
+# --no-renames: у переноса файла между сервисами меняются оба, а не только приёмник
 # shellcheck disable=SC2086
-if ! diff_out=$(git diff --name-only $range); then printf '%s' "$all_json"; exit 0; fi
+if ! diff_out=$(git diff --no-renames --name-only $range); then printf '%s' "$all_json"; exit 0; fi
 
 # dirs = все тест-каталоги; changed = изменённые файлы
 mapfile -t dirs    < <(json_items "$all_json")
 mapfile -t changed < <(printf '%s' "$diff_out" | sed '/^$/d')
 
 hit=()
+names=()
 for f in "${changed[@]}"; do
   # исключения не влияют на тесты (в tree — кроме файлов сервисов)
   if [ "$mode" != tree ] || [[ "$f" != "$SERVICES_DIR"/*/* ]]; then
@@ -105,6 +114,7 @@ for f in "${changed[@]}"; do
       rest=${f#"$SERVICES_DIR"/}
       name=${rest%%/*}
       svc="$SERVICES_DIR/$name"
+      names+=("$name")
       for d in "${dirs[@]}"; do
         [ "$d" = "." ] && continue
         case "$d" in
@@ -119,6 +129,20 @@ for f in "${changed[@]}"; do
       ;;
   esac
 done
+
+# Соседи: тесты другого сервиса, которые читают исходники изменённого по пути
+# (`parents[5] / "tenant-service" / ...` — контрактные проверки). Ищем их по самим тестам,
+# а не таблицей «кто кого читает»: новый контракт подхватится сам.
+if [ ${#names[@]} -gt 0 ]; then
+  mapfile -t names < <(printf '%s\n' "${names[@]}" | sort -u)
+  for name in "${names[@]}"; do
+    for d in "${dirs[@]}"; do
+      [ "$d" = "." ] && continue
+      case "$d" in "$SERVICES_DIR/$name"|"$SERVICES_DIR/$name"/*) continue;; esac
+      grep -rqE --include='*.py' "/ *\"$name\"" "$d" 2>/dev/null && hit+=("$d")
+    done
+  done
+fi
 
 # результат: [] если ничего не затронуто, иначе список без дублей
 if [ ${#hit[@]} -eq 0 ]; then
