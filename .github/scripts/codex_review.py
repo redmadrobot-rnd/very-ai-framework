@@ -8,6 +8,8 @@
 #   сразу постим коммент-заглушку («анализирую… ⏳») — видно, что джоб пошёл;
 #   считаем дифф PR против базовой ветки (git fetch base + refs/pull/<n>/head);
 #   код PR — в read-only detached worktree; codex exec копает его сам и отдаёт JSON;
+#   ту же сессию сразу спрашиваем «что ещё?» (codex exec resume): следующая порция
+#   находок приходит в этом ревью, а не через круг правок; ответы сливаем без дублей;
 #   оставляем только находки, привязываемые к строке диффа (прочее — в summary);
 #   есть inline → один PR-review: вердикт+summary в теле, заглушку удаляем;
 #   нет inline → вписываем итог в заглушку.
@@ -130,6 +132,24 @@ PR_META_TMPL = (
     "Description:\n<<<PR_BODY\n{body}\nPR_BODY\n\n"
 )
 
+# One pass reports only the issues that stand out first; the next tier used to
+# surface only after those were fixed, one review round later. Asked again in the
+# same session (code already read, context cached) codex brings that tier right
+# away; a second follow-up adds almost nothing (A/B on 10 PRs, 30.10.2026).
+FOLLOWUP_PROMPT = """\
+Continue reviewing the same pull request. Your previous answer listed the issues
+that stood out first. Now find ADDITIONAL real issues that are not in any of your
+previous answers in this session — a different root cause or a different location.
+Prioritise parts of the change you have not examined closely yet: changed files and
+functions you only skimmed, error paths, edge cases, callers of changed code. Apply
+the same standards as before and never repeat or rephrase an issue you already
+reported.
+
+Reply with ONLY a JSON object in the same schema as before ("verdict", "summary",
+"overall", "findings"), containing only the new items. If you cannot substantiate
+anything new, return empty "overall" and "findings" arrays.
+"""
+
 
 def env(name: str) -> str:
     val = os.environ.get(name)
@@ -223,6 +243,48 @@ def parse_codex_json(text: str) -> dict | None:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return None
+
+
+def run_codex(argv: list[str], prompt: str, **kwargs) -> tuple[str | None, str]:
+    """Run codex with --json; return the session id and its last message text."""
+    thread_id, text = None, ""
+    for line in run(*argv, "-", input=prompt, **kwargs).splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item") or {}
+        if event.get("type") == "thread.started":
+            thread_id = event.get("thread_id")
+        elif (
+            event.get("type") == "item.completed"
+            and item.get("type") == "agent_message"
+        ):
+            text = item.get("text") or ""
+    return thread_id, text
+
+
+def merge_reviews(first: dict, more: dict | None) -> dict:
+    """Add the follow-up's items to the first answer, minus already flagged lines."""
+    if not more:
+        return first
+    flagged = {(f.get("path"), f.get("line")) for f in first.get("findings") or []}
+    findings = [
+        f
+        for f in more.get("findings") or []
+        if (f.get("path"), f.get("line")) not in flagged
+    ]
+    overall = more.get("overall") or []
+    if not findings and not overall:
+        return first
+    merged = dict(first)
+    merged["findings"] = (first.get("findings") or []) + findings
+    merged["overall"] = (first.get("overall") or []) + overall
+    if more.get("verdict") == "needs_changes":
+        merged["verdict"] = "needs_changes"
+    summaries = (first.get("summary"), more.get("summary"))
+    merged["summary"] = " ".join(s for s in summaries if s)
+    return merged
 
 
 def build_summary(
@@ -365,15 +427,19 @@ def main() -> None:
     # it runs git itself (see PR_CONTEXT_NOTE). high reasoning effort — digs deeper
     # across calls/cross-file links. project_doc_max_bytes=0: don't load AGENTS.md
     # from the PR-controlled worktree (prompt-injection vector, e.g. "return lgtm").
-    codex_argv = [
-        "codex",
-        "exec",
-        "--sandbox",
-        "read-only",
+    codex_config = [
         "-c",
         'model_reasoning_effort="high"',
         "-c",
         "project_doc_max_bytes=0",
+    ]
+    codex_argv = [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "read-only",
+        *codex_config,
         "--cd",
         wt,
     ]
@@ -386,7 +452,28 @@ def main() -> None:
         + "\n"
     )
     try:
-        raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
+        thread_id, raw = run_codex(codex_argv, prompt, timeout=600, env=codex_env)
+        parsed = parse_codex_json(raw)
+        if parsed is not None and thread_id:
+            # resume has no --sandbox/--cd: the sandbox goes through config,
+            # the worktree is the cwd
+            resume_argv = [
+                "codex",
+                "exec",
+                "resume",
+                "--json",
+                "-c",
+                'sandbox_mode="read-only"',
+                *codex_config,
+                thread_id,
+            ]
+            try:
+                _, more = run_codex(
+                    resume_argv, FOLLOWUP_PROMPT, timeout=600, env=codex_env, cwd=wt
+                )
+                parsed = merge_reviews(parsed, parse_codex_json(more))
+            except Exception as exc:  # noqa: BLE001 — the first answer is a full review
+                print(f"follow-up failed, posting the first answer only: {exc}")
     except Exception as exc:  # noqa: BLE001 — a codex failure must not strand the placeholder
         finalize(
             "🤖 Codex review: не удалось выполнить codex."
@@ -400,7 +487,6 @@ def main() -> None:
             text=True,
         )
 
-    parsed = parse_codex_json(raw)
     if parsed is None:
         finalize("🤖 **Codex review**\n\n" + raw.strip()[:60000])
         return

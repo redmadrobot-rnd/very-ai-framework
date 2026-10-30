@@ -34,7 +34,8 @@ jobs:
       github.event.action == 'opened' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, codex]
-    timeout-minutes: 20
+    # ревью до 10 мин + дожим «что ещё?» в той же сессии до 10
+    timeout-minutes: 30
     permissions:
       pull-requests: write
       contents: read

@@ -19,7 +19,8 @@ jobs:
       contains(github.event.comment.body, '@codex review') &&
       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, codex]
-    timeout-minutes: 20
+    # ревью до 10 мин + дожим «что ещё?» в той же сессии до 10
+    timeout-minutes: 30
     permissions:
       pull-requests: write
       contents: read
